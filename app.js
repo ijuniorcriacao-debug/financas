@@ -173,20 +173,30 @@ function render() {
   renderTabs();
   $('#fab').style.display = ui.tab === 'ajustes' ? 'none' : '';
 }
+const ICON = {
+  resumo: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
+  lanc: '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2zM9 8h6M9 12h6"/>',
+  divisao: '<path d="M12 3v18M5 7h14M5 7l-3 7a3 3 0 0 0 6 0zM19 7l-3 7a3 3 0 0 0 6 0z"/>',
+  plano: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.2"/>',
+  ajustes: '<path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/>',
+  meu: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
+  meus: '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2zM9 8h6M9 12h6"/>',
+};
+const icon = (k) => `<svg viewBox="0 0 24 24" aria-hidden="true">${ICON[k]}</svg>`;
 const tabsFor = () => (ui.who === 'casa'
-  ? [['resumo', '📊', 'Resumo'], ['lanc', '🧾', 'Lançamentos'], ['divisao', '⚖️', 'Divisão'], ['plano', '🎯', 'Plano'], ['ajustes', '⚙️', 'Ajustes']]
-  : [['meu', '📊', 'Meu resumo'], ['meus', '🧾', 'Meus gastos'], ['ajustes', '⚙️', 'Ajustes']]);
+  ? [['resumo', 'resumo', 'Resumo'], ['lanc', 'lanc', 'Lançamentos'], ['divisao', 'divisao', 'Divisão'], ['plano', 'plano', 'Plano'], ['ajustes', 'ajustes', 'Ajustes']]
+  : [['meu', 'meu', 'Meu resumo'], ['meus', 'meus', 'Meus gastos'], ['ajustes', 'ajustes', 'Ajustes']]);
 function whoBar() {
-  const opts = CLOUD ? [['casa', '🏠 Casa'], [S.me, '👤 ' + S.people[S.me].name]]
-    : [['casa', '🏠 Casa'], [0, '👤 ' + S.people[0].name], [1, '👤 ' + S.people[1].name]];
-  return `<div class="whobar">${opts.map(([v, l]) => `<button data-a="who" data-v="${v}" class="${ui.who === v ? 'on' : ''}">${esc(l)}</button>`).join('')}</div>`;
+  const opts = CLOUD ? [['casa', 'Casa', 'home'], [S.me, S.people[S.me].name, 'p' + S.me]]
+    : [['casa', 'Casa', 'home'], [0, S.people[0].name, 'p0'], [1, S.people[1].name, 'p1']];
+  return `<div class="whobar" role="tablist">${opts.map(([v, l, dot]) => `<button data-a="who" data-v="${v}" class="${ui.who === v ? 'on' : ''}"><span class="who-dot ${dot}"></span><span class="ellipsis">${esc(l)}</span></button>`).join('')}</div>`;
 }
 function renderTabs() {
   const tabs = tabsFor();
-  $('#tabs').innerHTML = tabs.map(([id, e, l]) => `<button data-a="tab" data-v="${id}" class="${ui.tab === id ? 'on' : ''}"><span>${e}</span>${l}</button>`).join('');
+  $('#tabs').innerHTML = tabs.map(([id, ic, l]) => `<button data-a="tab" data-v="${id}" class="${ui.tab === id ? 'on' : ''}" ${ui.tab === id ? 'aria-current="page"' : ''}>${icon(ic)}<span>${l}</span></button>`).join('');
 }
 function monthHeader(title) {
-  return `<div class="header"><h1>${title}</h1><div class="month">
+  return `<div class="header"><div><div class="eyebrow">${ui.who === 'casa' ? 'Finanças da casa' : 'Só meu'}</div><h1>${title}</h1></div><div class="month">
     <button class="icon" data-a="month" data-v="-1" aria-label="Mês anterior">‹</button>
     <b>${monthLabel(ui.ym)}</b>
     <button class="icon" data-a="month" data-v="1" aria-label="Próximo mês">›</button></div></div>`;
@@ -209,35 +219,51 @@ function viewResumo() {
   const data = months.map((m) => ({ m, inc: monthIncome(m).total, exp: sum(expenses(houseTx(m))) }));
   const maxV = Math.max(1, ...data.map((d) => Math.max(d.inc, d.exp)));
 
-  return `${monthHeader('Resumo da casa')}
-  <div class="card big"><div class="muted">${left >= 0 ? 'Sobra após as contas da casa' : 'Faltou para cobrir a casa'}</div>
-    <div class="v ${left >= 0 ? 'good' : 'bad'}">${brl(left)}</div>
-    <div class="muted">Meta de poupança: ${brl(goal)} ${left >= goal ? '✅ atingida' : `— faltam ${brl(goal - Math.max(left, 0))}`}</div></div>
-  <div class="grid3">
-    <div class="card kpi"><div class="l">Receitas</div><div class="v">${brl0(inc.total)}</div></div>
-    <div class="card kpi"><div class="l">Despesas</div><div class="v">${brl0(spent)}</div></div>
-    <div class="card kpi"><div class="l">A pagar (fixas)</div><div class="v ${pending ? 'warn' : ''}">${brl0(pending)}</div></div>
+  const teto = inc.total - goal;
+  const sev = used > 1 ? 'bad' : spent > teto ? 'warn' : '';
+  const capPos = inc.total > 0 ? Math.min(100, (teto / inc.total) * 100) : 100;
+  const natTotal = Object.values(nat).reduce((x, y) => x + y, 0);
+  const trendMax = niceMax(Math.max(...data.map((d) => Math.max(d.inc, d.exp))));
+  const trendCols = data.map((d, i) => `<div class="col ${i === data.length - 1 ? 'now' : ''}" title="${esc(monthLabel(d.m))}: receita ${brl(d.inc)} · despesa ${brl(d.exp)}">
+      <div class="pair"><i class="inc" style="height:${(d.inc / trendMax) * 100}%"></i><i class="exp" style="height:${(d.exp / trendMax) * 100}%"></i></div><div class="mo">${monthShort(d.m)}</div></div>`).join('');
+
+  return `${monthHeader('Resumo')}
+  <div class="hero"><div class="lbl">${left >= 0 ? 'Sobra depois das contas da casa' : 'Faltou para cobrir a casa'}</div>
+    <div class="fig ${left >= 0 ? '' : 'bad'}">${brl(left)}</div>
+    <div class="sub"><span class="pill ${left >= goal ? 'good' : 'warn'}">${left >= goal ? 'Meta de guardar atingida' : `Faltam ${brl(goal - Math.max(left, 0))} para a meta`}</span>
+      <span style="margin-left:6px">Meta: <b>${brl(goal)}</b> (${S.savingsPct}% da renda)</span></div></div>
+
+  <div class="kpis">
+    <div><div class="l">Receitas</div><div class="v">${brl0(inc.total)}</div></div>
+    <div><div class="l">Despesas</div><div class="v">${brl0(spent)}</div></div>
+    <div><div class="l">Fixas a pagar</div><div class="v ${pending ? 'warn' : ''}">${brl0(pending)}</div></div>
   </div>
-  <div class="card"><div class="row"><b>Renda comprometida</b><b class="${used > 1 ? 'bad' : used > (100 - S.savingsPct) / 100 ? 'warn' : 'good'}">${pct(used)}</b></div>
-    ${bar(spent, inc.total, used > 1)}
-    <p class="muted">Para guardar ${S.savingsPct}%, o teto de gastos é ${brl0(inc.total - goal)}.</p></div>
+
+  <div class="meterbox"><div class="row"><b>Renda comprometida</b><span class="num ${sev}">${pct(used)}</span></div>
+    <div class="meter ${sev}" role="img" aria-label="${pct(used)} da renda comprometida; o traço marca o teto de ${brl0(teto)}"><i style="width:${Math.min(100, used * 100)}%"></i><span class="cap" style="left:calc(${capPos}% - 1px)"></span></div>
+    <div class="muted">O traço marca o teto de gastos (${brl0(teto)}) para conseguir guardar ${S.savingsPct}%.</div></div>
 
   <h2>Tipo de gasto</h2>
-  <div class="grid3">${Object.entries(NATURES).map(([k, l]) => `<div class="card kpi"><div class="l">${l}s</div><div class="v">${brl0(nat[k] || 0)}</div><div class="l">${spent ? pct((nat[k] || 0) / spent) : '0%'}</div></div>`).join('')}</div>
+  <div class="stack" role="img" aria-label="Fixas, variáveis e esporádicas">${['fixa', 'variavel', 'esporadica'].map((k, i) => (nat[k] ? `<i class="n${i}" style="flex:${nat[k]}"></i>` : '')).join('')}${natTotal ? '' : '<i style="flex:1;background:var(--track)"></i>'}</div>
+  <div class="legend3">${['fixa', 'variavel', 'esporadica'].map((k, i) => `<div class="it"><div class="k"><span class="sw n${i}"></span>${NATURES[k]}s</div><div class="v">${brl0(nat[k] || 0)}</div><div class="p">${natTotal ? pct((nat[k] || 0) / natTotal) : '0%'}</div></div>`).join('')}</div>
 
   <h2>Para onde foi o dinheiro</h2>
-  <div class="card">${cats.length ? cats.map((c) => {
+  ${cats.length ? cats.map((c) => {
     const k = cat(c.id);
-    return `<div class="cat"><div class="top"><span>${k.emoji} ${esc(k.name)} ${k.essential ? '' : '<span class="tag">flexível</span>'}</span><b>${brl(c.cents)} <span class="muted">${pct(c.cents / spent)}</span></b></div>${bar(c.cents, top)}</div>`;
-  }).join('') : '<div class="empty">Nenhum gasto neste mês ainda.<br>Toque no + para lançar.</div>'}</div>
+    return `<div class="cat"><div class="top"><span class="glyph">${k.emoji}</span><span class="nm">${esc(k.name)}${k.essential ? '' : '<span class="tag">flexível</span>'}</span><span class="am">${brl(c.cents)}</span><span class="pc">${pct(c.cents / spent)}</span></div>${bar(c.cents, top)}</div>`;
+  }).join('') : '<div class="empty">Nenhum gasto neste mês ainda.<br>Toque em Lançar para começar.</div>'}
 
   <h2>Onde dá para apertar</h2>${insights(list, houseTx(shiftYm(ui.ym, -1)), inc.total, true)}
   <p class="muted">Aqui entram só as contas da casa. Gastos pessoais (academia, hobbies…) ficam na tela de cada um.</p>
 
   <h2>Últimos 6 meses</h2>
-  <div class="card"><div class="trend">${data.map((d) => `<div class="col"><div class="pair"><i class="inc" style="height:${(d.inc / maxV) * 100}%" title="Receita"></i><i class="exp" style="height:${(d.exp / maxV) * 100}%" title="Despesa"></i></div>${monthShort(d.m)}</div>`).join('')}</div>
-    <div class="legend"><span><span style="color:var(--bar)">■</span> receita</span><span><span style="color:var(--brand)">■</span> despesa</span></div></div>`;
+  <div class="trendbox"><div class="trend" role="img" aria-label="Receita e despesa da casa nos últimos 6 meses">
+      <div class="grid"><span style="top:0"><b>${compactBrl(trendMax)}</b></span><span style="top:50%"><b>${compactBrl(trendMax / 2)}</b></span></div>${trendCols}</div>
+    <div class="legend"><span><span class="sw" style="background:var(--track)"></span>Receita</span><span><span class="sw" style="background:var(--brand)"></span>Despesa da casa</span></div>
+    <details class="tbl"><summary>Ver valores</summary><table><tr><th>Mês</th><th>Receita</th><th>Despesa</th></tr>${data.map((d) => `<tr><td>${esc(monthLabel(d.m))}</td><td>${brl(d.inc)}</td><td>${brl(d.exp)}</td></tr>`).join('')}</table></details></div>`;
 }
+const niceMax = (v) => { if (v <= 0) return 100000; const p = 10 ** Math.floor(Math.log10(v)); const m = [1, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10].find((x) => x * p >= v); return m * p; };
+const compactBrl = (c) => { const v = c / 100; return v >= 1000 ? `${(v / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mil` : String(Math.round(v)); };
 
 function insights(list, prevList, incTotal, useBudgets) {
   const exp = expenses(list), spent = sum(exp);
@@ -253,13 +279,13 @@ function insights(list, prevList, incTotal, useBudgets) {
   }
   byCategory(list).forEach((c) => {
     const k = cat(c.id), p = (prev.find((x) => x.id === c.id) || { cents: 0 }).cents;
-    if (p > 0 && c.cents > p * 1.2 && c.cents - p >= 5000) out.push(['warn', `${k.emoji} <b>${esc(k.name)}</b> subiu ${pct((c.cents - p) / p)} vs. mês passado (${brl(p)} → ${brl(c.cents)}).`]);
-    if (useBudgets && k.budget > 0 && c.cents > k.budget) out.push(['bad', `${k.emoji} <b>${esc(k.name)}</b> estourou o orçamento em ${brl(c.cents - k.budget)}.`]);
+    if (p > 0 && c.cents > p * 1.2 && c.cents - p >= 5000) out.push(['warn', `<b>${esc(k.name)}</b> subiu ${pct((c.cents - p) / p)} vs. mês passado (${brl(p)} → ${brl(c.cents)}).`]);
+    if (useBudgets && k.budget > 0 && c.cents > k.budget) out.push(['bad', `<b>${esc(k.name)}</b> estourou o orçamento em ${brl(c.cents - k.budget)}.`]);
   });
   const subs = sum(exp.filter((t) => t.cat === 'assinaturas'));
-  if (subs > 0) out.push(['', `📺 Assinaturas custam <b>${brl(subs)}/mês</b> (${brl(subs * 12)} por ano). Vale revisar o que realmente usam.`]);
+  if (subs > 0) out.push(['', `Assinaturas custam <b>${brl(subs)}/mês</b> (${brl(subs * 12)} por ano). Vale revisar o que realmente usam.`]);
   const biggest = [...exp].sort((a, b) => b.cents - a.cents).slice(0, 3);
-  out.push(['', `💸 Maiores gastos: ${biggest.map((t) => `${esc(t.desc)} (${brl(t.cents)})`).join(', ')}.`]);
+  out.push(['', `Maiores gastos: ${biggest.map((t) => `${esc(t.desc)} (${brl(t.cents)})`).join(', ')}.`]);
   if (incTotal > 0 && spent > incTotal) out.push(['bad', `Os gastos passaram a renda em <b>${brl(spent - incTotal)}</b>. Foque primeiro nas categorias flexíveis acima.`]);
   return out.map(([c, h]) => `<div class="insight ${c}">${h}</div>`).join('');
 }
@@ -273,12 +299,12 @@ function viewMeu() {
   const cats = byCategory(mine), top = cats[0] ? cats[0].cents : 0;
   const shared = personalTx(ui.ym, 1 - i).filter((t) => t.vis !== 'private');
   const acerto = s.debtor === null ? '' : s.debtor === i
-    ? `<div class="insight warn">⚖️ Pelo acerto da casa, você ainda deve transferir <b>${brl(s.owes)}</b> para ${esc(o.name)}.</div>`
-    : `<div class="insight">⚖️ Pelo acerto da casa, ${esc(o.name)} deve transferir <b>${brl(s.owes)}</b> para você.</div>`;
+    ? `<div class="insight warn">Pelo acerto da casa, você ainda deve transferir <b>${brl(s.owes)}</b> para ${esc(o.name)}.</div>`
+    : `<div class="insight">Pelo acerto da casa, ${esc(o.name)} deve transferir <b>${brl(s.owes)}</b> para você.</div>`;
   return `${monthHeader('Olá, ' + esc(p.name))}
   <div class="card big"><div class="muted">${left >= 0 ? 'Sobra pra você no mês' : 'Faltou no mês'}</div>
     <div class="v ${left >= 0 ? 'good' : 'bad'}">${brl(left)}</div>
-    <div class="muted">Meta de guardar (${S.savingsPct}%): ${brl(goal)} ${left >= goal ? '✅ atingida' : `— faltam ${brl(goal - Math.max(left, 0))}`}</div></div>
+    <div class="muted">Meta de guardar (${S.savingsPct}%): ${brl(goal)} ${left >= goal ? 'meta atingida' : `— faltam ${brl(goal - Math.max(left, 0))}`}</div></div>
   <div class="card"><table>
     <tr><td>Sua renda</td><td>${brl(income)}</td></tr>
     <tr><td>Sua parte da casa (${pct(s.r[i])})</td><td>− ${brl(fair)}</td></tr>
@@ -291,7 +317,7 @@ function viewMeu() {
     : '<div class="empty">Nenhum gasto pessoal neste mês.<br>Toque no + e escolha "Só meu".</div>'}</div>
   ${spent ? `<h2>Onde dá para apertar</h2>${insights(mine, personalTx(shiftYm(ui.ym, -1), i), income, false)}` : ''}
   ${shared.length ? `<h2>Compartilhado por ${esc(o.name)}</h2><p class="muted">Gastos pessoais que ${esc(o.name)} deixou visíveis para você (${brl(sum(shared))} no mês). Veja em "Meus gastos".</p>` : ''}
-  <p class="muted">🔒 Privacidade: "só meu" esconde o gasto na tela do parceiro, mas os dados ficam no mesmo aparelho e no arquivo de backup.</p>`;
+  <p class="muted">Privacidade: "só meu" esconde o gasto na tela do parceiro, mas os dados ficam no mesmo aparelho e no arquivo de backup.</p>`;
 }
 
 /* ----- Lançamentos ----- */
@@ -316,22 +342,22 @@ function renderList() {
   const list = txSource()
     .filter((t) => (!ui.cat || t.cat === ui.cat) && (!ui.nat || t.nature === ui.nat) && (!q || t.desc.toLowerCase().includes(q)))
     .sort((a, b) => b.date.localeCompare(a.date));
-  if (!list.length) { el.innerHTML = '<div class="empty">Nada por aqui. Toque no + para lançar um gasto.</div>'; return; }
+  if (!list.length) { el.innerHTML = '<div class="empty">Nada por aqui. Toque em Lançar para registrar um gasto.</div>'; return; }
   const total = sum(expenses(list).filter((t) => !isPersonal(t) || t.payer === ui.who));
   el.innerHTML = `<div class="muted">${list.length} lançamentos · ${ui.who === 'casa' ? 'despesas' : 'seus gastos'} ${brl(total)}</div>` + list.map((t) => {
-    const k = t.kind === 'despesa' ? cat(t.cat) : { emoji: t.kind === 'receita' ? '💰' : '🤝' };
+    const k = t.kind === 'despesa' ? cat(t.cat) : { emoji: t.kind === 'receita' ? '+' : '⇄' };
     const sign = t.kind === 'despesa' ? '−' : '+';
     const mine = !isPersonal(t) || t.payer === ui.who;
     const who = t.kind === 'despesa'
-      ? `${t.payer === 'joint' ? '🏦' : `<span class="pdot" style="background:var(--p${t.payer})"></span>`}${esc(pName(t.payer))} · ${t.split === 'shared' ? 'casa' : t.vis === 'private' ? '🔒 só meu' : '👀 pessoal'}`
+      ? `<span class="pdot" style="background:${t.payer === 'joint' ? 'var(--ink-2)' : `var(--p${t.payer})`}"></span>${esc(pName(t.payer))} · ${t.split === 'shared' ? 'casa' : t.vis === 'private' ? 'só meu' : 'pessoal'}`
       : `<span class="pdot" style="background:var(--p${t.payer})"></span>${esc(pName(t.payer))}`;
     return `<div class="tx ${t.nature === 'fixa' && !t.paid ? 'paid-no' : ''}">
       <div class="emo">${k.emoji}</div>
       <div class="grow" ${mine ? `data-a="edit-tx" data-v="${t.id}" style="cursor:pointer"` : ''}>
         <div class="ellipsis"><b>${esc(t.desc)}</b></div>
-        <div class="muted">${dayLabel(t.date)} · ${who}${t.kind === 'despesa' ? ` · <span class="tag">${NATURES[t.nature]}</span>` : ''}</div></div>
-      <div style="text-align:right"><div class="amt ${t.kind === 'despesa' ? '' : 'good'}">${sign} ${brl(t.cents)}</div>
-        ${t.nature === 'fixa' && t.kind === 'despesa' && mine ? `<label style="margin:2px 0 0;font-size:.75rem"><input type="checkbox" data-c="paid" data-v="${t.id}" ${t.paid ? 'checked' : ''}> pago</label>` : ''}</div>
+        <div class="meta">${dayLabel(t.date)} · ${who}${t.kind === 'despesa' ? ` · <span class="tag">${NATURES[t.nature]}</span>` : ''}</div></div>
+      <div style="text-align:right"><div class="amt ${t.kind === 'despesa' ? '' : 'good'}">${sign}&nbsp;${brl(t.cents)}</div>
+        ${t.nature === 'fixa' && t.kind === 'despesa' && mine ? `<label class="chk"><input type="checkbox" data-c="paid" data-v="${t.id}" ${t.paid ? 'checked' : ''}> pago</label>` : ''}</div>
     </div>`;
   }).join('');
 }
@@ -340,7 +366,7 @@ function renderList() {
 function viewDivisao() {
   const s = settlement(ui.ym), [a, b] = S.people, inc = monthIncome(ui.ym);
   const result = s.debtor === null
-    ? `<div class="v good">Tudo certo! ✅</div><div class="muted">Ninguém deve nada neste mês.</div>`
+    ? `<div class="v good">Tudo certo</div><div class="muted">Ninguém deve nada neste mês.</div>`
     : `<div class="muted">Para ficar justo</div><div class="v">${esc(S.people[s.debtor].name)} transfere</div><div class="v bad">${brl(s.owes)}</div><div class="muted">para ${esc(S.people[1 - s.debtor].name)}</div>
        <p><button class="primary" data-a="settle">Registrar acerto feito</button></p>`;
   const sal = S.people[0].income + S.people[1].income;
@@ -359,7 +385,7 @@ function viewDivisao() {
       <tr><td>Se fosse 50/50</td><td>${brl(s.fiftyFifty[0])}</td><td>${brl(s.fiftyFifty[1])}</td></tr>
       <tr><td>Diferença p/ 50/50</td><td class="${s.fair[0] < s.fiftyFifty[0] ? 'good' : 'bad'}">${brl(s.fair[0] - s.fiftyFifty[0])}</td><td class="${s.fair[1] < s.fiftyFifty[1] ? 'good' : 'bad'}">${brl(s.fair[1] - s.fiftyFifty[1])}</td></tr>
     </table></div>
-  ${s.joint > 0 ? `<div class="card"><h3>🏦 Conta conjunta</h3><p>Gastos pagos pela conta conjunta: <b>${brl(s.joint)}</b>. Aporte proporcional: <b>${esc(a.name)} ${brl(s.joint * s.r[0])}</b> · <b>${esc(b.name)} ${brl(s.joint * s.r[1])}</b>.</p></div>` : ''}
+  ${s.joint > 0 ? `<div class="card"><h3>Conta conjunta</h3><p>Gastos pagos pela conta conjunta: <b>${brl(s.joint)}</b>. Aporte proporcional: <b>${esc(a.name)} ${brl(s.joint * s.r[0])}</b> · <b>${esc(b.name)} ${brl(s.joint * s.r[1])}</b>.</p></div>` : ''}
 
   <h2>Visão por pessoa</h2><p class="muted">Sem os gastos pessoais — cada um vê os seus na própria tela.</p>
   <div class="card"><table><tr><th></th><th>${esc(a.name)}</th><th>${esc(b.name)}</th></tr>
@@ -367,7 +393,7 @@ function viewDivisao() {
     <tr><td>Parte das divididas</td><td>${brl(s.fair[0])}</td><td>${brl(s.fair[1])}</td></tr>
     <tr><td><b>Sobra após a casa</b></td>${[0, 1].map((i) => { const left = inc.person[i] - s.fair[i]; return `<td class="${left >= 0 ? 'good' : 'bad'}"><b>${brl(left)}</b></td>`; }).join('')}</tr>
     <tr><td>Meta de guardar</td>${[0, 1].map((i) => `<td>${brl(inc.person[i] * S.savingsPct / 100)}</td>`).join('')}</tr></table></div>
-  ${s.acertos.length ? `<h2>Acertos registrados</h2><div class="card">${s.acertos.map((t) => `<div class="tx"><div class="emo">🤝</div><div class="grow" data-a="edit-tx" data-v="${t.id}"><b>${esc(pName(t.payer))} → ${esc(pName(1 - t.payer))}</b><div class="muted">${dayLabel(t.date)}</div></div><div class="amt">${brl(t.cents)}</div></div>`).join('')}</div>` : ''}`;
+  ${s.acertos.length ? `<h2>Acertos registrados</h2><div class="card">${s.acertos.map((t) => `<div class="tx"><div class="emo">⇄</div><div class="grow" data-a="edit-tx" data-v="${t.id}"><b>${esc(pName(t.payer))} → ${esc(pName(1 - t.payer))}</b><div class="muted">${dayLabel(t.date)}</div></div><div class="amt">${brl(t.cents)}</div></div>`).join('')}</div>` : ''}`;
 }
 
 /* ----- Plano ----- */
@@ -420,8 +446,8 @@ function viewAjustes() {
 
   ${CLOUD ? accountCard() : `  <div class="card"><h3>Backup e sincronização</h3>
     <p class="muted">Os dados ficam só neste aparelho. Para usar nos dois celulares: exporte aqui e importe no outro (ou mande o arquivo pelo WhatsApp). Faça isso depois de lançar gastos novos.</p>
-    <div class="grid2"><button data-a="export">⬇️ Exportar backup</button><button data-a="import">⬆️ Importar backup</button></div>
-    <button data-a="csv" style="width:100%;margin-top:8px">📄 Exportar planilha (CSV)</button>
+    <div class="grid2"><button data-a="export">Exportar backup</button><button data-a="import">Importar backup</button></div>
+    <button data-a="csv" style="width:100%;margin-top:8px">Exportar planilha (CSV)</button>
     <input type="file" id="file" accept="application/json" hidden>
     <button class="danger" data-a="reset" style="width:100%;margin-top:8px">Apagar todos os dados</button></div>`}`;
 }
@@ -438,7 +464,7 @@ const val = (f, n) => f.elements[n].value;
 
 function openSetup() {
   if ($('#setup-form')) return;
-  openSheet(`<h1>Bem-vindos! 👋</h1><p class="muted">Vamos configurar o básico. Dá para mudar depois em Ajustes.</p>
+  openSheet(`<h1>Bem-vindos</h1><p class="muted">Vamos configurar o básico. Dá para mudar depois em Ajustes.</p>
     <form id="setup-form">
       ${S.people.map((p, i) => `<div class="grid2"><div><label>Nome ${i + 1}</label><input name="n${i}" placeholder="Ex.: ${i ? 'Maria' : 'João'}" required></div>
         <div><label>Renda mensal (R$)</label><input name="i${i}" inputmode="decimal" placeholder="0,00" required></div></div>`).join('')}
@@ -455,15 +481,15 @@ function txForm(t) {
   const isNew = !t.id;
   openSheet(`<h2 style="margin-top:0">${isNew ? 'Novo lançamento' : 'Editar lançamento'}</h2>
   <form id="tx-form">
-    ${t.kind === 'acerto' ? '' : seg('kind', [['despesa', '💸 Despesa'], ['receita', '💰 Receita extra']], t.kind)}
+    ${t.kind === 'acerto' ? '' : seg('kind', [['despesa', 'Despesa'], ['receita', 'Receita extra']], t.kind)}
     <label>Descrição</label><input name="desc" value="${esc(t.desc)}" required placeholder="Ex.: Mercado da semana">
     <div class="grid2"><div><label id="l-val">Valor (R$)</label><input name="val" inputmode="decimal" value="${t.cents ? num(t.cents) : ''}" required placeholder="0,00"></div>
       <div><label>Data</label><input name="date" type="date" value="${t.date}" required></div></div>
     <div id="exp-fields" ${t.kind === 'despesa' ? '' : 'hidden'}>
       <label>Categoria</label><select name="cat">${catOptions(t.cat)}</select>
       <label>Tipo de gasto</label>${seg('nature', Object.entries(NATURES).map(([k, l]) => [k, l]), t.nature)}
-      <label>Onde entra</label>${seg('split', [['shared', '🏠 Casa (divide pela renda)'], ['personal', '👤 Pessoal (só meu)']], t.split)}
-      <div id="vis-fields" ${t.split === 'personal' ? '' : 'hidden'}><label>Quem pode ver</label>${seg('vis', [['open', '👀 Parceiro vê'], ['private', '🔒 Só eu']], t.vis || 'open')}</div>
+      <label>Onde entra</label>${seg('split', [['shared', 'Casa (divide pela renda)'], ['personal', 'Pessoal (só meu)']], t.split)}
+      <div id="vis-fields" ${t.split === 'personal' ? '' : 'hidden'}><label>Quem pode ver</label>${seg('vis', [['open', 'Parceiro vê'], ['private', 'Só eu']], t.vis || 'open')}</div>
     </div>
     <label id="l-payer">${t.kind === 'receita' ? 'Quem recebeu' : t.split === 'personal' ? 'De quem é o gasto' : 'Quem pagou'}</label><select name="payer">${payerOptions(t.payer, t.kind === 'despesa' && t.split !== 'personal', t.kind === 'despesa' && t.split === 'personal')}</select>
     ${isNew ? `<div id="inst" ${t.kind === 'despesa' ? '' : 'hidden'}><label>Parcelas (meses seguidos, opcional)</label><input name="n" type="number" min="1" max="60" value="1"></div>` : ''}
@@ -525,8 +551,8 @@ function tplForm(t) {
       <div><label>Dia do vencimento</label><input name="day" type="number" min="1" max="31" value="${t.day}" required></div></div>
     <label>Categoria</label><select name="cat">${catOptions(t.cat)}</select>
     <label>Quem paga</label><select name="payer">${payerOptions(t.payer, true, t.split === 'personal')}</select>
-    <label>Onde entra</label>${seg('split', [['shared', '🏠 Casa (divide pela renda)'], ['personal', '👤 Pessoal (só meu)']], t.split)}
-    <div id="vis-fields" ${t.split === 'personal' ? '' : 'hidden'}><label>Quem pode ver</label>${seg('vis', [['open', '👀 Parceiro vê'], ['private', '🔒 Só eu']], t.vis || 'open')}</div>
+    <label>Onde entra</label>${seg('split', [['shared', 'Casa (divide pela renda)'], ['personal', 'Pessoal (só meu)']], t.split)}
+    <div id="vis-fields" ${t.split === 'personal' ? '' : 'hidden'}><label>Quem pode ver</label>${seg('vis', [['open', 'Parceiro vê'], ['private', 'Só eu']], t.vis || 'open')}</div>
     <label><input type="checkbox" name="active" ${t.active ? 'checked' : ''}> Ativa (lançar todo mês)</label>
     <div class="actions">${isNew ? '' : '<button type="button" class="danger" data-a="del-tpl">Excluir</button>'}<button class="primary" type="submit">Salvar</button></div>
   </form>`);
@@ -671,17 +697,17 @@ function peopleCard() {
   }).join('');
   const other = CLOUD ? S.people[1 - S.me] : null;
   const invite = other && other.pending
-    ? `<div class="insight warn">👋 Falta a outra pessoa entrar. Peça para abrir o app, criar a conta e, em <b>"Entrar com o código"</b>, digitar:<div style="font-size:1.5rem;font-weight:800;letter-spacing:3px;margin-top:4px">${esc(S.invite)}</div></div>` : '';
+    ? `<div class="insight warn">Falta a outra pessoa entrar. Peça para abrir o app, criar a conta e, em <b>"Entrar com o código"</b>, digitar:<div style="font-size:1.5rem;font-weight:800;letter-spacing:3px;margin-top:4px">${esc(S.invite)}</div></div>` : '';
   return `<div class="card"><h3>Pessoas e renda mensal</h3>${rows}${invite}
     <p class="muted">A divisão das despesas usa a proporção entre as duas rendas. ${CLOUD ? 'Cada um atualiza apenas a própria renda e o próprio nome.' : 'Atualize aqui se algum salário mudar.'}</p></div>`;
 }
 function accountCard() {
-  return `<div class="card"><h3>☁️ Conta e sincronização</h3>
+  return `<div class="card"><h3>Conta e sincronização</h3>
     <p class="muted">Conectado como <b>${esc(cloudEmail)}</b>. Tudo é salvo online e aparece no celular do parceiro em segundos. Gastos marcados como "só eu" ficam escondidos dele no servidor.</p>
-    <div class="grid2"><button data-a="export">⬇️ Backup (arquivo)</button><button data-a="csv">📄 Planilha (CSV)</button></div>
+    <div class="grid2"><button data-a="export">Backup (arquivo)</button><button data-a="csv">Planilha (CSV)</button></div>
     <button class="danger" data-a="logout" style="width:100%;margin-top:8px">Sair da conta</button></div>`;
 }
-const offlineBanner = () => (CLOUD && cloudOffline ? '<div class="insight warn">📴 Sem conexão. Você vê o último estado salvo; o que lançar agora será enviado quando a internet voltar.</div>' : '');
+const offlineBanner = () => (CLOUD && cloudOffline ? '<div class="insight warn">Sem conexão. Você vê o último estado salvo; o que lançar agora será enviado quando a internet voltar.</div>' : '');
 
 /* ---------- nuvem (Supabase) ---------- */
 let sb = null, cloudEmail = '', cloudUid = null, hid = null, cloudOffline = false;
@@ -798,7 +824,7 @@ const rpcMsg = (m) => (/invalid_code/.test(m) ? 'Código não encontrado. Confir
 
 function gateAuth(mode = 'login', msg = '') {
   const login = mode === 'login';
-  showGate(`<h1>🏠 Finanças da Casa</h1><p class="muted">Entre para ver as finanças do casal em qualquer celular.</p>
+  showGate(`<h1>Finanças da Casa</h1><p class="muted">Entre para ver as finanças do casal em qualquer celular.</p>
     <form id="auth-form" class="card"><label>E-mail</label><input name="email" type="email" required autocomplete="email">
       <label>Senha ${login ? '' : '(mínimo 6 caracteres)'}</label><input name="pass" type="password" minlength="6" required autocomplete="${login ? 'current-password' : 'new-password'}">
       <div class="actions"><button class="primary" type="submit">${login ? 'Entrar' : 'Criar conta'}</button></div>
@@ -819,7 +845,7 @@ function gateAuth(mode = 'login', msg = '') {
   };
 }
 function gateHousehold(msg = '') {
-  showGate(`<h1>Quase lá! 👋</h1><p class="muted">Conectado como ${esc(cloudEmail)}.</p>
+  showGate(`<h1>Quase lá</h1><p class="muted">Conectado como ${esc(cloudEmail)}.</p>
     <form id="hh-new" class="card"><h3>1ª pessoa: criar a casa</h3>
       <label>Seu nome</label><input name="name" required placeholder="Ex.: João">
       <label>Sua renda mensal (R$)</label><input name="income" inputmode="decimal" required placeholder="0,00">

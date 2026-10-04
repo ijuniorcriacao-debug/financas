@@ -214,8 +214,8 @@ function openImport(items, notes) {
   openSheet(`<h2 style="margin-top:0">Conferir antes de lançar</h2>
     ${notes.map((n) => `<p class="muted">${esc(n)}</p>`).join('')}
     <div class="imp-opts">
-      <label>Onde entram</label>${seg('imp-split', [['shared', '🏠 Casa'], ['personal', '👤 Pessoal']], st.split)}
-      <div id="imp-vis" ${st.split === 'personal' ? '' : 'hidden'}><label>Quem pode ver</label>${seg('imp-vis', [['open', '👀 Parceiro vê'], ['private', '🔒 Só eu']], st.vis)}</div>
+      <label>Onde entram</label>${seg('imp-split', [['shared', 'Casa'], ['personal', 'Pessoal']], st.split)}
+      <div id="imp-vis" ${st.split === 'personal' ? '' : 'hidden'}><label>Quem pode ver</label>${seg('imp-vis', [['open', 'Parceiro vê'], ['private', 'Só eu']], st.vis)}</div>
       <div class="grid2"><div><label id="imp-l-payer">Quem pagou</label><select id="imp-payer"></select></div>
         <div><label>Tipo de gasto</label><select id="imp-nature">${Object.entries(NATURES).map(([k, l]) => `<option value="${k}" ${k === st.nature ? 'selected' : ''}>${l}</option>`).join('')}</select></div></div>
     </div>
@@ -275,8 +275,9 @@ function openImport(items, notes) {
 }
 
 function importCard() {
-  return `<div class="card"><div class="row"><div class="grow"><b>📎 Importar de PDF ou foto</b><div class="muted">Fatura, extrato, cupom, comprovante…</div></div>
-    <button class="primary" data-a="doc-import">Escolher</button></div>
+  return `<div class="importbar"><span class="ic"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V4m0 0L8 8m4-4 4 4M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/></svg></span>
+    <div class="grow"><b>Importar de PDF ou foto</b><div class="muted">Fatura, extrato, cupom ou comprovante</div></div>
+    <button class="primary" data-a="doc-import">Escolher</button>
     <input type="file" id="doc-file" accept="application/pdf,image/*" multiple hidden></div>`;
 }
 document.addEventListener('change', (e) => {
