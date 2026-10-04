@@ -203,3 +203,27 @@ begin
     end if;
   end loop;
 end $$;
+
+-- ------------------------------------------------ limite diário da leitura por IA
+create table if not exists public.ai_usage (
+  user_id uuid not null references auth.users(id) on delete cascade,
+  day     date not null,
+  n       int  not null default 0,
+  primary key (user_id, day)
+);
+alter table public.ai_usage enable row level security;
+revoke all on public.ai_usage from anon, authenticated;
+
+create or replace function public.take_ai_quota(p_limit int) returns boolean
+language plpgsql security definer set search_path = public as $$
+declare v int;
+begin
+  if auth.uid() is null then return false; end if;
+  insert into public.ai_usage (user_id, day, n)
+  values (auth.uid(), (now() at time zone 'utc')::date, 1)
+  on conflict (user_id, day) do update set n = public.ai_usage.n + 1
+  returning n into v;
+  return v <= p_limit;
+end $$;
+revoke all on function public.take_ai_quota(int) from public, anon;
+grant execute on function public.take_ai_quota(int) to authenticated;

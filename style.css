@@ -100,3 +100,12 @@ body.gate nav#tabs, body.gate #fab { display: none; }
 .gate-box .actions { display: flex; margin-top: 14px; }
 .gate-box .actions button { flex: 1; }
 .gate-box .link { display: block; margin: 8px auto; }
+
+.imp-row { display: flex; gap: 10px; align-items: flex-start; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.imp-row.dup { opacity: .7; }
+.imp-on { margin: 6px 0 0; }
+.imp-row input[data-f=desc] { font-weight: 600; }
+.imp-line { display: grid; grid-template-columns: 1.4fr .8fr 1.2fr; gap: 6px; margin-top: 6px; }
+.imp-line input, .imp-line select { padding: 8px; font-size: .85rem; min-width: 0; }
+.imp-opts { margin-top: 8px; }
+.sheet .big { padding: 28px 8px; }

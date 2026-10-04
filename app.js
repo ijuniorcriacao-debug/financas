@@ -297,6 +297,7 @@ function viewMeu() {
 /* ----- Lançamentos ----- */
 function viewLanc(title) {
   return `${monthHeader(title)}
+  ${importCard()}
   <div class="filters">
     <input id="f-q" placeholder="Buscar…" value="${esc(ui.q)}" data-c="filter">
     <select id="f-cat" data-c="filter"><option value="">Categorias</option>${S.cats.map((c) => `<option value="${c.id}" ${ui.cat === c.id ? 'selected' : ''}>${c.emoji} ${esc(c.name)}</option>`).join('')}</select>
@@ -572,6 +573,7 @@ const actions = {
   tab: (v) => { ui.tab = v; render(); window.scrollTo(0, 0); },
   month: (v) => { ui.ym = shiftYm(ui.ym, +v); render(); },
   'new-tx': newTx,
+  'doc-import': () => $('#doc-file').click(),
   'edit-tx': (v) => { const t = S.tx.find((x) => x.id === v); if (t) { editing = t.id; txForm(t); } },
   'del-tx': () => {
     const t = S.tx.find((x) => x.id === editing);

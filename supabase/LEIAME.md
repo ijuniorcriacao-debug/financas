@@ -37,3 +37,14 @@ dos gastos "só meu" garantida **no servidor**.
    `https://ijuniorcriacao-debug.github.io/financas/`; em *Sign In / Providers → Email*, desligar
    "Confirm email" se quiserem entrar sem confirmar por e-mail.
 5. Testar com duas contas e publicar.
+
+## Importar gastos de PDF ou foto
+- `import.js` (app): PDF digital é lido no próprio aparelho (pdf.js, sem custo); foto, cupom ou PDF
+  escaneado vai para a função `supabase/functions/extrair-gastos` (IA, modelo `claude-haiku-4-5`).
+  Sempre há uma tela de conferência antes de lançar; duplicados vêm desmarcados.
+- A função está publicada com `verify_jwt = false` porque ela mesma valida o login (`auth.getUser()`),
+  exige que a pessoa já esteja em uma casa e limita 40 leituras por pessoa/dia (`take_ai_quota`).
+- **Segredos (só o dono, painel Supabase → Edge Functions → Secrets):**
+  `ANTHROPIC_API_KEY` (obrigatório), `ALLOWED_EMAILS` (e-mails dos dois, separados por vírgula),
+  `AI_MODEL` (opcional). Sem a chave, o app avisa que a IA não foi ativada; PDFs digitais seguem funcionando.
+- Recomendado depois que os dois criarem conta: Authentication → desligar "Allow new users to sign up".

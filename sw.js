@@ -1,5 +1,5 @@
-const CACHE = 'financas-v2';
-const ASSETS = ['./', './index.html', './style.css', './app.js', './config.js', './manifest.json', './icon.svg'];
+const CACHE = 'financas-v3';
+const ASSETS = ['./', './index.html', './style.css', './app.js', './import.js', './config.js', './manifest.json', './icon.svg'];
 
 self.addEventListener('install', (e) => {
   self.skipWaiting();
