@@ -70,8 +70,10 @@ function defaultState() {
     tpl: [],
   };
 }
-let S = load();
-let ui = { tab: 'resumo', who: S.who === 0 || S.who === 1 ? S.who : 'casa', ym: todayStr().slice(0, 7), q: '', cat: '', nat: '' };
+const CFG = window.SUPABASE_CONFIG || {};
+const CLOUD = !!(CFG.url && CFG.key);
+let S = CLOUD ? defaultState() : load();
+let ui = { tab: 'resumo', who: !CLOUD && (S.who === 0 || S.who === 1) ? S.who : 'casa', ym: todayStr().slice(0, 7), q: '', cat: '', nat: '' };
 
 function load() {
   try {
@@ -81,6 +83,7 @@ function load() {
   return defaultState();
 }
 function save() {
+  if (CLOUD) { cloudCacheWrite(); cloudSchedule(); return; }
   try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { toast('Não foi possível salvar neste navegador'); }
 }
 function toast(msg) {
@@ -149,7 +152,7 @@ function ensureFixed(ym) {
   S.tpl.filter((t) => t.active && ym >= t.start).forEach((t) => {
     if (S.tx.some((x) => x.tplId === t.id && x.date.startsWith(ym))) return;
     S.tx.push({
-      id: uid(), kind: 'despesa', date: `${ym}-${pad(Math.min(t.day, daysIn(ym)))}`, desc: t.desc, cents: t.cents,
+      id: `${t.id}-${ym}`, kind: 'despesa', date: `${ym}-${pad(Math.min(t.day, daysIn(ym)))}`, desc: t.desc, cents: t.cents,
       cat: t.cat, nature: 'fixa', payer: t.payer, split: t.split, vis: t.vis, paid: false, tplId: t.id,
     });
     changed = true;
@@ -159,11 +162,13 @@ function ensureFixed(ym) {
 
 /* ---------- render ---------- */
 function render() {
-  if (!S.setup) { openSetup(); }
+  document.body.classList.remove('gate');
+  if (CLOUD && ui.who !== 'casa' && ui.who !== S.me) ui.who = 'casa';
+  if (!S.setup && !CLOUD) { openSetup(); }
   ensureFixed(ui.ym);
   const views = { resumo: viewResumo, lanc: () => viewLanc('Lançamentos'), divisao: viewDivisao, plano: viewPlano, ajustes: viewAjustes, meu: viewMeu, meus: () => viewLanc('Meus gastos') };
   if (!tabsFor().some((t) => t[0] === ui.tab)) ui.tab = tabsFor()[0][0];
-  $('#view').innerHTML = whoBar() + views[ui.tab]();
+  $('#view').innerHTML = offlineBanner() + whoBar() + views[ui.tab]();
   if (ui.tab === 'lanc' || ui.tab === 'meus') renderList();
   renderTabs();
   $('#fab').style.display = ui.tab === 'ajustes' ? 'none' : '';
@@ -172,7 +177,8 @@ const tabsFor = () => (ui.who === 'casa'
   ? [['resumo', '📊', 'Resumo'], ['lanc', '🧾', 'Lançamentos'], ['divisao', '⚖️', 'Divisão'], ['plano', '🎯', 'Plano'], ['ajustes', '⚙️', 'Ajustes']]
   : [['meu', '📊', 'Meu resumo'], ['meus', '🧾', 'Meus gastos'], ['ajustes', '⚙️', 'Ajustes']]);
 function whoBar() {
-  const opts = [['casa', '🏠 Casa'], [0, '👤 ' + S.people[0].name], [1, '👤 ' + S.people[1].name]];
+  const opts = CLOUD ? [['casa', '🏠 Casa'], [S.me, '👤 ' + S.people[S.me].name]]
+    : [['casa', '🏠 Casa'], [0, '👤 ' + S.people[0].name], [1, '👤 ' + S.people[1].name]];
   return `<div class="whobar">${opts.map(([v, l]) => `<button data-a="who" data-v="${v}" class="${ui.who === v ? 'on' : ''}">${esc(l)}</button>`).join('')}</div>`;
 }
 function renderTabs() {
@@ -401,10 +407,7 @@ function viewPlano() {
 function viewAjustes() {
   const fx = S.tpl.filter((t) => (ui.who === 'casa' ? t.split === 'shared' : t.split === 'personal' && t.payer === ui.who)).sort((a, b) => a.day - b.day);
   return `<div class="header"><h1>Ajustes</h1></div>
-  <div class="card"><h3>Pessoas e renda mensal</h3>
-    ${S.people.map((p, i) => `<div class="grid2"><div><label>Nome</label><input value="${esc(p.name)}" data-c="pname" data-v="${i}"></div>
-      <div><label>Renda (R$)</label><input inputmode="decimal" value="${num(p.income)}" data-c="pincome" data-v="${i}"></div></div>`).join('')}
-    <p class="muted">A divisão das despesas usa a proporção entre as duas rendas. Atualize aqui se algum salário mudar.</p></div>
+  ${peopleCard()}
 
   <div class="card"><div class="row"><h3>${ui.who === 'casa' ? 'Contas fixas da casa' : 'Minhas contas fixas'}</h3><button class="primary" data-a="new-tpl">+ Nova</button></div>
     <p class="muted">${ui.who === 'casa' ? 'Aluguel, internet, escola…' : 'Sua academia, plano do celular…'} são lançadas sozinhas todo mês (você só marca como "pago").</p>
@@ -414,12 +417,12 @@ function viewAjustes() {
     ${S.cats.map((c) => `<div class="row" style="padding:6px 0"><span>${c.emoji} ${esc(c.name)}</span><label style="margin:0;font-size:.8rem"><input type="checkbox" data-c="essential" data-v="${c.id}" ${c.essential ? 'checked' : ''}> essencial</label></div>`).join('')}
     <p class="muted">Categorias que não são essenciais aparecem como "flexíveis" — é onde o app sugere apertar.</p></div>
 
-  <div class="card"><h3>Backup e sincronização</h3>
+  ${CLOUD ? accountCard() : `  <div class="card"><h3>Backup e sincronização</h3>
     <p class="muted">Os dados ficam só neste aparelho. Para usar nos dois celulares: exporte aqui e importe no outro (ou mande o arquivo pelo WhatsApp). Faça isso depois de lançar gastos novos.</p>
     <div class="grid2"><button data-a="export">⬇️ Exportar backup</button><button data-a="import">⬆️ Importar backup</button></div>
     <button data-a="csv" style="width:100%;margin-top:8px">📄 Exportar planilha (CSV)</button>
     <input type="file" id="file" accept="application/json" hidden>
-    <button class="danger" data-a="reset" style="width:100%;margin-top:8px">Apagar todos os dados</button></div>`;
+    <button class="danger" data-a="reset" style="width:100%;margin-top:8px">Apagar todos os dados</button></div>`}`;
 }
 
 /* ---------- sheets ---------- */
@@ -428,7 +431,7 @@ function openSheet(html) {
 }
 const closeSheet = () => { $('#sheet-root').innerHTML = ''; };
 const catOptions = (sel) => S.cats.map((c) => `<option value="${c.id}" ${c.id === sel ? 'selected' : ''}>${c.emoji} ${esc(c.name)}</option>`).join('');
-const payerOptions = (sel, joint = true) => [0, 1].map((i) => `<option value="${i}" ${String(sel) === String(i) ? 'selected' : ''}>${esc(S.people[i].name)}</option>`).join('') + (joint ? `<option value="joint" ${sel === 'joint' ? 'selected' : ''}>Conta conjunta</option>` : '');
+const payerOptions = (sel, joint = true, personalOnly = false) => [0, 1].filter((i) => !(CLOUD && personalOnly && i !== S.me)).map((i) => `<option value="${i}" ${String(sel) === String(i) ? 'selected' : ''}>${esc(S.people[i].name)}</option>`).join('') + (joint ? `<option value="joint" ${sel === 'joint' ? 'selected' : ''}>Conta conjunta</option>` : '');
 const seg = (name, opts, sel) => `<div class="seg">${opts.map(([v, l]) => `<label><input type="radio" name="${name}" value="${v}" ${v === sel ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div>`;
 const val = (f, n) => f.elements[n].value;
 
@@ -461,7 +464,7 @@ function txForm(t) {
       <label>Onde entra</label>${seg('split', [['shared', '🏠 Casa (divide pela renda)'], ['personal', '👤 Pessoal (só meu)']], t.split)}
       <div id="vis-fields" ${t.split === 'personal' ? '' : 'hidden'}><label>Quem pode ver</label>${seg('vis', [['open', '👀 Parceiro vê'], ['private', '🔒 Só eu']], t.vis || 'open')}</div>
     </div>
-    <label id="l-payer">${t.kind === 'receita' ? 'Quem recebeu' : t.split === 'personal' ? 'De quem é o gasto' : 'Quem pagou'}</label><select name="payer">${payerOptions(t.payer, t.kind === 'despesa' && t.split !== 'personal')}</select>
+    <label id="l-payer">${t.kind === 'receita' ? 'Quem recebeu' : t.split === 'personal' ? 'De quem é o gasto' : 'Quem pagou'}</label><select name="payer">${payerOptions(t.payer, t.kind === 'despesa' && t.split !== 'personal', t.kind === 'despesa' && t.split === 'personal')}</select>
     ${isNew ? `<div id="inst" ${t.kind === 'despesa' ? '' : 'hidden'}><label>Parcelas (meses seguidos, opcional)</label><input name="n" type="number" min="1" max="60" value="1"></div>` : ''}
     <div class="actions">${isNew ? '' : '<button type="button" class="danger" data-a="del-tx">Excluir</button>'}<button class="primary" type="submit">Salvar</button></div>
   </form>`);
@@ -475,7 +478,7 @@ function txForm(t) {
     const inst = $('#inst'); if (inst) inst.hidden = k !== 'despesa';
     const sel = f.elements.payer, cur = sel.value;
     const joint = k === 'despesa' && !personalSel;
-    sel.innerHTML = payerOptions(cur === 'joint' && !joint ? 0 : cur, joint);
+    sel.innerHTML = payerOptions(cur === 'joint' && !joint ? (CLOUD ? S.me : 0) : cur, joint, personalSel);
     $('#l-payer').textContent = k === 'receita' ? 'Quem recebeu' : k === 'acerto' ? 'Quem transferiu' : personalSel ? 'De quem é o gasto' : 'Quem pagou';
   };
   f.addEventListener('change', sync);
@@ -509,7 +512,7 @@ function txForm(t) {
 function newTx() {
   const d = todayStr();
   const own = ui.who !== 'casa';
-  txForm({ kind: 'despesa', desc: '', cents: 0, date: d.startsWith(ui.ym) ? d : `${ui.ym}-01`, cat: own ? 'esporte' : 'mercado', nature: 'variavel', split: own ? 'personal' : 'shared', vis: 'open', payer: own ? ui.who : 0 });
+  txForm({ kind: 'despesa', desc: '', cents: 0, date: d.startsWith(ui.ym) ? d : `${ui.ym}-01`, cat: own ? 'esporte' : 'mercado', nature: 'variavel', split: own ? 'personal' : 'shared', vis: 'open', payer: own ? ui.who : (CLOUD ? S.me : 0) });
 }
 
 function tplForm(t) {
@@ -520,7 +523,7 @@ function tplForm(t) {
     <div class="grid2"><div><label>Valor (R$)</label><input name="val" inputmode="decimal" value="${t.cents ? num(t.cents) : ''}" required></div>
       <div><label>Dia do vencimento</label><input name="day" type="number" min="1" max="31" value="${t.day}" required></div></div>
     <label>Categoria</label><select name="cat">${catOptions(t.cat)}</select>
-    <label>Quem paga</label><select name="payer">${payerOptions(t.payer)}</select>
+    <label>Quem paga</label><select name="payer">${payerOptions(t.payer, true, t.split === 'personal')}</select>
     <label>Onde entra</label>${seg('split', [['shared', '🏠 Casa (divide pela renda)'], ['personal', '👤 Pessoal (só meu)']], t.split)}
     <div id="vis-fields" ${t.split === 'personal' ? '' : 'hidden'}><label>Quem pode ver</label>${seg('vis', [['open', '👀 Parceiro vê'], ['private', '🔒 Só eu']], t.vis || 'open')}</div>
     <label><input type="checkbox" name="active" ${t.active ? 'checked' : ''}> Ativa (lançar todo mês)</label>
@@ -529,9 +532,9 @@ function tplForm(t) {
   $('#tpl-form').addEventListener('change', (e) => {
     const f = e.currentTarget, personalSel = f.querySelector('[name=split]:checked').value === 'personal';
     $('#vis-fields').hidden = !personalSel;
-    if (personalSel && f.elements.payer.value === 'joint') f.elements.payer.value = '0';
+    if (personalSel && f.elements.payer.value === 'joint') f.elements.payer.value = String(CLOUD ? S.me : 0);
     const keep = f.elements.payer.value;
-    f.elements.payer.innerHTML = payerOptions(keep, !personalSel);
+    f.elements.payer.innerHTML = payerOptions(keep, !personalSel, personalSel);
   });
   $('#tpl-form').addEventListener('submit', (e) => {
     e.preventDefault();
@@ -580,7 +583,7 @@ const actions = {
     S.tx = S.tx.filter((x) => x.id !== t.id && !(all && x.group === t.group && x.date > t.date));
     save(); closeSheet(); render(); toast('Excluído');
   },
-  'new-tpl': () => { editing = null; const own = ui.who !== 'casa'; tplForm({ desc: '', cents: 0, day: 5, cat: own ? 'esporte' : 'moradia', payer: own ? ui.who : 0, split: own ? 'personal' : 'shared', vis: 'open', active: true }); },
+  'new-tpl': () => { editing = null; const own = ui.who !== 'casa'; tplForm({ desc: '', cents: 0, day: 5, cat: own ? 'esporte' : 'moradia', payer: own ? ui.who : (CLOUD ? S.me : 0), split: own ? 'personal' : 'shared', vis: 'open', active: true }); },
   'edit-tpl': (v) => { const t = S.tpl.find((x) => x.id === v); if (t) { editing = t.id; tplForm(t); } },
   'del-tpl': () => {
     if (!confirm('Excluir esta conta fixa? Lançamentos já pagos são mantidos.')) return;
@@ -602,6 +605,10 @@ const actions = {
     const d = todayStr();
     editing = null;
     txForm({ kind: 'acerto', desc: 'Acerto de contas', cents: s.owes, date: d.startsWith(ui.ym) ? d : `${ui.ym}-${pad(daysIn(ui.ym))}`, payer: s.debtor });
+  },
+  logout: async () => {
+    try { await sb.auth.signOut(); } catch (e) { /* segue */ }
+    location.reload();
   },
   export: () => download(`financas-casa-${todayStr()}.json`, JSON.stringify(S, null, 2), 'application/json'),
   import: () => $('#file').click(),
@@ -653,5 +660,208 @@ document.addEventListener('change', (e) => {
   }
 });
 
-render();
+/* ---------- tela de pessoas / conta ---------- */
+function peopleCard() {
+  const rows = S.people.map((p, i) => {
+    const mine = !CLOUD || i === S.me, dis = mine ? '' : 'disabled';
+    return `<div class="grid2"><div><label>Nome</label><input value="${esc(p.name)}" data-c="pname" data-v="${i}" ${dis}></div>
+      <div><label>Renda (R$)</label><input inputmode="decimal" value="${num(p.income)}" data-c="pincome" data-v="${i}" ${dis}></div></div>`;
+  }).join('');
+  const other = CLOUD ? S.people[1 - S.me] : null;
+  const invite = other && other.pending
+    ? `<div class="insight warn">👋 Falta a outra pessoa entrar. Peça para abrir o app, criar a conta e, em <b>"Entrar com o código"</b>, digitar:<div style="font-size:1.5rem;font-weight:800;letter-spacing:3px;margin-top:4px">${esc(S.invite)}</div></div>` : '';
+  return `<div class="card"><h3>Pessoas e renda mensal</h3>${rows}${invite}
+    <p class="muted">A divisão das despesas usa a proporção entre as duas rendas. ${CLOUD ? 'Cada um atualiza apenas a própria renda e o próprio nome.' : 'Atualize aqui se algum salário mudar.'}</p></div>`;
+}
+function accountCard() {
+  return `<div class="card"><h3>☁️ Conta e sincronização</h3>
+    <p class="muted">Conectado como <b>${esc(cloudEmail)}</b>. Tudo é salvo online e aparece no celular do parceiro em segundos. Gastos marcados como "só eu" ficam escondidos dele no servidor.</p>
+    <div class="grid2"><button data-a="export">⬇️ Backup (arquivo)</button><button data-a="csv">📄 Planilha (CSV)</button></div>
+    <button class="danger" data-a="logout" style="width:100%;margin-top:8px">Sair da conta</button></div>`;
+}
+const offlineBanner = () => (CLOUD && cloudOffline ? '<div class="insight warn">📴 Sem conexão. Você vê o último estado salvo; o que lançar agora será enviado quando a internet voltar.</div>' : '');
+
+/* ---------- nuvem (Supabase) ---------- */
+let sb = null, cloudEmail = '', cloudUid = null, hid = null, cloudOffline = false;
+let snap = { tx: {}, tpl: {}, cats: {}, me: '', pct: -1 };
+let pushTimer = null, chain = Promise.resolve(), channel = null;
+const isNetErr = (e) => /fetch|network|offline|timeout/i.test(String((e && e.message) || e)) || !navigator.onLine;
+
+const rowTx = (t) => ({ id: t.id, household_id: hid, kind: t.kind, date: t.date, descr: t.desc, cents: t.cents, cat: t.cat ?? null, nature: t.nature ?? null, payer: String(t.payer), split: t.split ?? null, vis: t.vis ?? null, paid: !!t.paid, tpl_id: t.tplId ?? null, grp: t.group ?? null });
+const fromTx = (r) => ({ id: r.id, kind: r.kind, date: r.date, desc: r.descr, cents: Number(r.cents), cat: r.cat ?? undefined, nature: r.nature ?? undefined, payer: r.payer === 'joint' ? 'joint' : +r.payer, split: r.split ?? undefined, vis: r.vis ?? undefined, paid: r.paid, tplId: r.tpl_id ?? undefined, group: r.grp ?? undefined });
+const rowTpl = (t) => ({ id: t.id, household_id: hid, descr: t.desc, cents: t.cents, day: t.day, cat: t.cat, payer: String(t.payer), split: t.split, vis: t.vis ?? null, active: !!t.active, start_ym: t.start });
+const fromTpl = (r) => ({ id: r.id, desc: r.descr, cents: Number(r.cents), day: r.day, cat: r.cat, payer: r.payer === 'joint' ? 'joint' : +r.payer, split: r.split, vis: r.vis ?? undefined, active: r.active, start: r.start_ym });
+const rowCat = (c) => ({ household_id: hid, id: c.id, name: c.name, emoji: c.emoji, essential: !!c.essential, budget_cents: c.budget || 0 });
+const fromCat = (r) => ({ id: r.id, name: r.name, emoji: r.emoji, essential: r.essential, budget: Number(r.budget_cents) });
+const rowMe = (p) => ({ name: p.name, income_cents: p.income });
+const TABLES = [['tx', () => S.tx, rowTx, 'id'], ['tpl', () => S.tpl, rowTpl, 'id'], ['cats', () => S.cats, rowCat, 'household_id,id']];
+
+function snapshotAll() {
+  TABLES.forEach(([name, get, mk]) => { snap[name] = {}; get().forEach((it) => { snap[name][it.id] = JSON.stringify(mk(it)); }); });
+  snap.me = JSON.stringify(rowMe(S.people[S.me])); snap.pct = S.savingsPct;
+}
+const cacheKey = () => `${KEY}-cloud-${cloudUid}`;
+function cloudCacheWrite() {
+  if (!cloudUid || !hid) return;
+  try { localStorage.setItem(cacheKey(), JSON.stringify({ S, snap, hid })); } catch (e) { /* sem cache */ }
+}
+function cloudCacheRead() {
+  try { const c = JSON.parse(localStorage.getItem(cacheKey())); if (c && c.S) { S = c.S; snap = c.snap; hid = c.hid; return true; } } catch (e) { /* sem cache */ }
+  return false;
+}
+const chunks = (arr, n = 200) => { const out = []; for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n)); return out; };
+const must = (r) => { if (r.error) throw r.error; return r; };
+
+async function pushAll() {
+  if (!hid) return;
+  for (const [name, get, mk, conflict] of TABLES) {
+    const cur = {}; get().forEach((it) => { cur[it.id] = mk(it); });
+    const old = snap[name], fresh = [], changed = [], gone = [];
+    for (const id in cur) { const j = JSON.stringify(cur[id]); if (!(id in old)) fresh.push(cur[id]); else if (old[id] !== j) changed.push(cur[id]); }
+    for (const id in old) if (!(id in cur)) gone.push(id);
+    for (const c of chunks(fresh)) must(await sb.from(name).upsert(c, { onConflict: conflict, ignoreDuplicates: true }));
+    for (const c of chunks(changed)) must(await sb.from(name).upsert(c, { onConflict: conflict }));
+    for (const c of chunks(gone)) {
+      let q = sb.from(name).delete();
+      if (name === 'cats') q = q.eq('household_id', hid);
+      must(await q.in('id', c));
+    }
+    for (const id in cur) old[id] = JSON.stringify(cur[id]);
+    gone.forEach((id) => delete old[id]);
+  }
+  const me = JSON.stringify(rowMe(S.people[S.me]));
+  if (me !== snap.me) { must(await sb.from('members').update(rowMe(S.people[S.me])).eq('user_id', cloudUid)); snap.me = me; }
+  if (S.savingsPct !== snap.pct) { must(await sb.from('households').update({ savings_pct: S.savingsPct }).eq('id', hid)); snap.pct = S.savingsPct; }
+}
+function enqueue(fn) { chain = chain.then(fn, fn); return chain; }
+function cloudSchedule() { clearTimeout(pushTimer); pushTimer = setTimeout(cloudFlush, 400); }
+function cloudFlush() {
+  clearTimeout(pushTimer);
+  return enqueue(async () => {
+    try { await pushAll(); setOffline(false); cloudCacheWrite(); }
+    catch (e) {
+      if (isNetErr(e)) { setOffline(true); return; }
+      console.error(e); toast('Não foi possível salvar: ' + (e.message || 'erro')); 
+      try { await pull(); render(); } catch (e2) { /* segue */ }
+    }
+  });
+}
+function setOffline(v) { if (cloudOffline !== v) { cloudOffline = v; if (hid) render(); } }
+
+async function fetchAll(table, order) {
+  const out = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await sb.from(table).select('*').order(order).range(from, from + 999);
+    if (error) throw error;
+    out.push(...data);
+    if (data.length < 1000) break;
+  }
+  return out;
+}
+/** Lê tudo do servidor. Devolve false se o usuário ainda não pertence a nenhuma casa. */
+async function pull() {
+  const h = must(await sb.from('households').select('*').maybeSingle()).data;
+  const members = await fetchAll('members', 'idx');
+  const mine = members.find((m) => m.user_id === cloudUid);
+  if (!h || !mine) return false;
+  const [cats, tx, tpl] = await Promise.all([fetchAll('cats', 'id'), fetchAll('tx', 'date'), fetchAll('tpl', 'id')]);
+  hid = h.id;
+  S = {
+    ...defaultState(), setup: true, me: mine.idx, invite: h.invite_code, savingsPct: h.savings_pct,
+    people: [0, 1].map((i) => { const m = members.find((x) => x.idx === i); return m ? { name: m.name, income: Number(m.income_cents) } : { name: 'Aguardando…', income: 0, pending: true }; }),
+    cats: cats.length ? cats.map(fromCat) : DEFAULT_CATS.map((c) => ({ ...c, budget: 0 })),
+    tx: tx.map(fromTx), tpl: tpl.map(fromTpl),
+  };
+  snapshotAll();
+  if (!cats.length) { snap.cats = {}; }
+  cloudCacheWrite(); setOffline(false);
+  return true;
+}
+async function cloudRefresh() {
+  const busy = document.activeElement && document.activeElement.closest && document.activeElement.closest('#view, #sheet-root') && /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
+  if (busy) { setTimeout(cloudRefresh, 3000); return; }
+  try { await cloudFlush(); await pull(); render(); } catch (e) { if (isNetErr(e)) setOffline(true); }
+}
+let refreshTimer = null;
+const cloudRefreshSoon = () => { clearTimeout(refreshTimer); refreshTimer = setTimeout(cloudRefresh, 600); };
+function startRealtime() {
+  if (channel || !hid) return;
+  channel = sb.channel('casa-' + hid).on('postgres_changes', { event: '*', schema: 'public' }, cloudRefreshSoon).subscribe();
+}
+
+/* ---------- login e convite ---------- */
+function showGate(html) { document.body.classList.add('gate'); $('#sheet-root').innerHTML = ''; $('#view').innerHTML = `<div class="gate-box">${html}</div>`; }
+const authMsg = (m) => ({ 'Invalid login credentials': 'E-mail ou senha incorretos.', 'User already registered': 'Esse e-mail já tem conta. Use "Entrar".', 'Email not confirmed': 'Confirme o e-mail (veja sua caixa de entrada) antes de entrar.' }[m] || m);
+const rpcMsg = (m) => (/invalid_code/.test(m) ? 'Código não encontrado. Confira com quem criou a casa.' : /household_full/.test(m) ? 'Essa casa já tem duas pessoas.' : /already_member/.test(m) ? 'Esta conta já pertence a uma casa.' : m);
+
+function gateAuth(mode = 'login', msg = '') {
+  const login = mode === 'login';
+  showGate(`<h1>🏠 Finanças da Casa</h1><p class="muted">Entre para ver as finanças do casal em qualquer celular.</p>
+    <form id="auth-form" class="card"><label>E-mail</label><input name="email" type="email" required autocomplete="email">
+      <label>Senha ${login ? '' : '(mínimo 6 caracteres)'}</label><input name="pass" type="password" minlength="6" required autocomplete="${login ? 'current-password' : 'new-password'}">
+      <div class="actions"><button class="primary" type="submit">${login ? 'Entrar' : 'Criar conta'}</button></div>
+      <p class="muted" id="auth-msg">${esc(msg)}</p></form>
+    <button class="link" id="auth-switch" type="button">${login ? 'Primeira vez? Criar conta' : 'Já tenho conta — entrar'}</button>`);
+  $('#auth-switch').onclick = () => gateAuth(login ? 'signup' : 'login');
+  $('#auth-form').onsubmit = async (e) => {
+    e.preventDefault();
+    const f = e.target, btn = f.querySelector('button.primary'), out = $('#auth-msg');
+    btn.disabled = true; out.textContent = '';
+    try {
+      const creds = { email: f.elements.email.value.trim(), password: f.elements.pass.value };
+      const r = login ? await sb.auth.signInWithPassword(creds) : await sb.auth.signUp(creds);
+      if (r.error) throw r.error;
+      if (!r.data.session) { out.textContent = 'Enviamos um e-mail de confirmação. Confirme e depois entre.'; btn.disabled = false; return; }
+      await enter(r.data.session);
+    } catch (err) { out.textContent = authMsg(err.message || String(err)); btn.disabled = false; }
+  };
+}
+function gateHousehold(msg = '') {
+  showGate(`<h1>Quase lá! 👋</h1><p class="muted">Conectado como ${esc(cloudEmail)}.</p>
+    <form id="hh-new" class="card"><h3>1ª pessoa: criar a casa</h3>
+      <label>Seu nome</label><input name="name" required placeholder="Ex.: João">
+      <label>Sua renda mensal (R$)</label><input name="income" inputmode="decimal" required placeholder="0,00">
+      <div class="actions"><button class="primary" type="submit">Criar a casa</button></div></form>
+    <form id="hh-join" class="card"><h3>2ª pessoa: entrar com o código</h3>
+      <label>Código recebido</label><input name="code" required placeholder="Ex.: 3F9A1C27" autocapitalize="characters">
+      <label>Seu nome</label><input name="name" required placeholder="Ex.: Ana">
+      <label>Sua renda mensal (R$)</label><input name="income" inputmode="decimal" required placeholder="0,00">
+      <div class="actions"><button class="primary" type="submit">Entrar na casa</button></div></form>
+    <p class="muted" id="hh-msg">${esc(msg)}</p><button class="link" id="hh-out" type="button">Sair da conta</button>`);
+  $('#hh-out').onclick = actions.logout;
+  const run = (fn, params) => async (e) => {
+    e.preventDefault();
+    const f = e.target, btn = f.querySelector('button.primary');
+    btn.disabled = true;
+    try { must(await sb.rpc(fn, params(f))); await enter(); }
+    catch (err) { $('#hh-msg').textContent = rpcMsg(err.message || String(err)); btn.disabled = false; }
+  };
+  $('#hh-new').onsubmit = run('create_household', (f) => ({ p_name: f.elements.name.value, p_income: parseMoney(f.elements.income.value) }));
+  $('#hh-join').onsubmit = run('join_household', (f) => ({ p_code: f.elements.code.value, p_name: f.elements.name.value, p_income: parseMoney(f.elements.income.value) }));
+}
+
+async function enter(session) {
+  if (!session) session = (await sb.auth.getSession()).data.session;
+  if (!session) return gateAuth();
+  cloudUid = session.user.id; cloudEmail = session.user.email || '';
+  try {
+    if (!(await pull())) return gateHousehold();
+    if (!S.cats.length || !Object.keys(snap.cats).length) cloudSchedule();   // 1ª vez: sobe as categorias padrão
+  } catch (e) {
+    if (isNetErr(e) && cloudCacheRead()) setOffline(true);
+    else { showGate(`<h1>Não foi possível carregar</h1><p class="muted">${esc(e.message || e)}</p><button class="primary" onclick="location.reload()">Tentar de novo</button>`); return; }
+  }
+  startRealtime(); render();
+}
+async function boot() {
+  if (!CLOUD) { render(); return; }
+  if (!window.supabase) { showGate('<h1>Sem conexão com o servidor</h1><p class="muted">Não foi possível carregar o necessário para entrar. Verifique a internet e tente de novo.</p><button class="primary" onclick="location.reload()">Tentar de novo</button>'); return; }
+  sb = window.supabase.createClient(CFG.url, CFG.key);
+  sb.auth.onAuthStateChange((ev) => { if (ev === 'SIGNED_OUT') { hid = null; channel = null; gateAuth(); } });
+  await enter();
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && hid) cloudRefreshSoon(); });
+  window.addEventListener('online', () => { if (hid) cloudRefresh(); });
+}
+
+boot();
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});

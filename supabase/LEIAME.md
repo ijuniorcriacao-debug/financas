@@ -9,7 +9,11 @@ dos gastos "só meu" garantida **no servidor**.
   segurança (RLS). Testado num Postgres local com 23 verificações, todas passando: o parceiro
   não vê gasto `vis = private`, ninguém altera gasto pessoal alheio, quem é de fora não acessa nada.
 
-## Falta fazer
+## Feito também (código)
+- Login, criação da casa, convite por código e sincronização estão em `app.js` (seção "nuvem"), ligados por `config.js`.
+  Com `config.js` vazio o app segue no modo local, sem login. Testado com um banco simulado e dois usuários: 17 verificações passando.
+
+## Falta fazer (itens 1, 2 e 4)
 1. Rodar `schema.sql` no projeto Supabase das finanças (SQL Editor → Run, ou via conector).
    Projeto novo: `apsnhujsytxtiidouxpt`. **Nunca usar** o projeto `xnzbeujtwagzkmogkifz`
    (é o app de personal, com dados de alunos).
