@@ -5,6 +5,8 @@ lançar despesas fixas, variáveis e esporádicas, ver para onde o dinheiro vai,
 as contas **proporcionalmente à renda** de cada um e planejar quanto guardar.
 
 ## Como usar
+Endereço publicado: https://ijuniorcriacao-debug.github.io/financas/
+
 Abra `index.html` (ou publique no GitHub Pages / qualquer hospedagem estática).
 Na primeira abertura informe os nomes e as rendas. Os dados ficam no navegador
 (`localStorage`); use **Ajustes → Exportar/Importar backup** para levar de um celular a outro.
