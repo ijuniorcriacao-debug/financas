@@ -13,7 +13,12 @@ dos gastos "só meu" garantida **no servidor**.
 - Login, criação da casa, convite por código e sincronização estão em `app.js` (seção "nuvem"), ligados por `config.js`.
   Com `config.js` vazio o app segue no modo local, sem login. Testado com um banco simulado e dois usuários: 17 verificações passando.
 
-## Falta fazer (itens 1, 2 e 4)
+## Situação
+- Banco aplicado no projeto `apsnhujsytxtiidouxpt` (tabelas, funções, 13 regras RLS, Realtime) e `config.js` preenchido.
+  Regras de privacidade verificadas no banco real (8 testes, em transação desfeita).
+- Se for recriar o banco: `schema.sql` é idempotente; no conector, aplicar em partes (a execução única estourou o tempo).
+
+## Falta fazer (item 4: configurações do painel, só o dono faz)
 1. Rodar `schema.sql` no projeto Supabase das finanças (SQL Editor → Run, ou via conector).
    Projeto novo: `apsnhujsytxtiidouxpt`. **Nunca usar** o projeto `xnzbeujtwagzkmogkifz`
    (é o app de personal, com dados de alunos).
