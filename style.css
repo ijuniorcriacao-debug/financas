@@ -244,3 +244,7 @@ body.gate nav#tabs, body.gate #fab { display: none; }
 .sheet .big { padding: 30px 8px; }
 
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+.tx.editable { cursor: pointer; margin: 0 -8px; padding-left: 8px; padding-right: 8px; border-radius: var(--r-m); }
+.tx.editable:hover, .tx.editable:focus-visible { background: var(--surface-2); }
+.tx.editable:active { background: var(--brand-soft); }

@@ -344,16 +344,16 @@ function renderList() {
     .sort((a, b) => b.date.localeCompare(a.date));
   if (!list.length) { el.innerHTML = '<div class="empty">Nada por aqui. Toque em Lançar para registrar um gasto.</div>'; return; }
   const total = sum(expenses(list).filter((t) => !isPersonal(t) || t.payer === ui.who));
-  el.innerHTML = `<div class="muted">${list.length} lançamentos · ${ui.who === 'casa' ? 'despesas' : 'seus gastos'} ${brl(total)}</div>` + list.map((t) => {
+  el.innerHTML = `<div class="muted">${list.length} lançamentos · ${ui.who === 'casa' ? 'despesas' : 'seus gastos'} ${brl(total)} · toque em um lançamento para editar ou excluir</div>` + list.map((t) => {
     const k = t.kind === 'despesa' ? cat(t.cat) : { emoji: t.kind === 'receita' ? '+' : '⇄' };
     const sign = t.kind === 'despesa' ? '−' : '+';
     const mine = !isPersonal(t) || t.payer === ui.who;
     const who = t.kind === 'despesa'
       ? `<span class="pdot" style="background:${t.payer === 'joint' ? 'var(--ink-2)' : `var(--p${t.payer})`}"></span>${esc(pName(t.payer))} · ${t.split === 'shared' ? 'casa' : t.vis === 'private' ? 'só meu' : 'pessoal'}`
       : `<span class="pdot" style="background:var(--p${t.payer})"></span>${esc(pName(t.payer))}`;
-    return `<div class="tx ${t.nature === 'fixa' && !t.paid ? 'paid-no' : ''}">
+    return `<div class="tx ${mine ? 'editable' : ''} ${t.nature === 'fixa' && !t.paid ? 'paid-no' : ''}" ${mine ? `data-a="edit-tx" data-v="${t.id}" role="button" tabindex="0" aria-label="Editar ${esc(t.desc)}"` : ''}>
       <div class="emo">${k.emoji}</div>
-      <div class="grow" ${mine ? `data-a="edit-tx" data-v="${t.id}" style="cursor:pointer"` : ''}>
+      <div class="grow">
         <div class="ellipsis"><b>${esc(t.desc)}</b></div>
         <div class="meta">${dayLabel(t.date)} · ${who}${t.kind === 'despesa' ? ` · <span class="tag">${NATURES[t.nature]}</span>` : ''}</div></div>
       <div style="text-align:right"><div class="amt ${t.kind === 'despesa' ? '' : 'good'}">${sign}&nbsp;${brl(t.cents)}</div>
@@ -393,7 +393,7 @@ function viewDivisao() {
     <tr><td>Parte das divididas</td><td>${brl(s.fair[0])}</td><td>${brl(s.fair[1])}</td></tr>
     <tr><td><b>Sobra após a casa</b></td>${[0, 1].map((i) => { const left = inc.person[i] - s.fair[i]; return `<td class="${left >= 0 ? 'good' : 'bad'}"><b>${brl(left)}</b></td>`; }).join('')}</tr>
     <tr><td>Meta de guardar</td>${[0, 1].map((i) => `<td>${brl(inc.person[i] * S.savingsPct / 100)}</td>`).join('')}</tr></table></div>
-  ${s.acertos.length ? `<h2>Acertos registrados</h2><div class="card">${s.acertos.map((t) => `<div class="tx"><div class="emo">⇄</div><div class="grow" data-a="edit-tx" data-v="${t.id}"><b>${esc(pName(t.payer))} → ${esc(pName(1 - t.payer))}</b><div class="muted">${dayLabel(t.date)}</div></div><div class="amt">${brl(t.cents)}</div></div>`).join('')}</div>` : ''}`;
+  ${s.acertos.length ? `<h2>Acertos registrados</h2><div class="card">${s.acertos.map((t) => `<div class="tx editable" data-a="edit-tx" data-v="${t.id}" role="button" tabindex="0"><div class="emo">⇄</div><div class="grow"><b>${esc(pName(t.payer))} → ${esc(pName(1 - t.payer))}</b><div class="muted">${dayLabel(t.date)}</div></div><div class="amt">${brl(t.cents)}</div></div>`).join('')}</div>` : ''}`;
 }
 
 /* ----- Plano ----- */
@@ -438,7 +438,7 @@ function viewAjustes() {
 
   <div class="card"><div class="row"><h3>${ui.who === 'casa' ? 'Contas fixas da casa' : 'Minhas contas fixas'}</h3><button class="primary" data-a="new-tpl">+ Nova</button></div>
     <p class="muted">${ui.who === 'casa' ? 'Aluguel, internet, escola…' : 'Sua academia, plano do celular…'} são lançadas sozinhas todo mês (você só marca como "pago").</p>
-    ${fx.length ? fx.map((t) => `<div class="tx"><div class="emo">${cat(t.cat).emoji}</div><div class="grow" data-a="edit-tpl" data-v="${t.id}" style="cursor:pointer"><b>${esc(t.desc)}</b><div class="muted">dia ${t.day} · ${esc(pName(t.payer))} · ${t.split === 'shared' ? 'casa' : t.vis === 'private' ? '🔒 só meu' : 'pessoal'}${t.active ? '' : ' · pausada'}</div></div><div class="amt">${brl(t.cents)}</div></div>`).join('') : '<div class="empty">Nenhuma conta fixa cadastrada.</div>'}</div>
+    ${fx.length ? fx.map((t) => `<div class="tx editable" data-a="edit-tpl" data-v="${t.id}" role="button" tabindex="0"><div class="emo">${cat(t.cat).emoji}</div><div class="grow"><b>${esc(t.desc)}</b><div class="muted">dia ${t.day} · ${esc(pName(t.payer))} · ${t.split === 'shared' ? 'casa' : t.vis === 'private' ? '🔒 só meu' : 'pessoal'}${t.active ? '' : ' · pausada'}</div></div><div class="amt">${brl(t.cents)}</div></div>`).join('') : '<div class="empty">Nenhuma conta fixa cadastrada.</div>'}</div>
 
   <div class="card"><div class="row"><h3>Categorias</h3><button data-a="new-cat">+ Nova</button></div>
     ${S.cats.map((c) => `<div class="row" style="padding:6px 0"><span>${c.emoji} ${esc(c.name)}</span><label style="margin:0;font-size:.8rem"><input type="checkbox" data-c="essential" data-v="${c.id}" ${c.essential ? 'checked' : ''}> essencial</label></div>`).join('')}
@@ -658,8 +658,13 @@ document.addEventListener('click', (e) => {
   if (e.target.classList?.contains('backdrop') && e.target.dataset.a === 'close-bd' && !$('#setup-form')) { closeSheet(); return; }
   const el = e.target.closest('[data-a]');
   if (!el || el.dataset.a === 'close-bd') return;
+  if (el.dataset.a === 'edit-tx' && e.target.closest('label, input')) return;   // marcar "pago" não abre a edição
   const fn = actions[el.dataset.a];
   if (fn) fn(el.dataset.v);
+});
+
+document.addEventListener('keydown', (e) => {
+  if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('[role=button][data-a]')) { e.preventDefault(); e.target.click(); }
 });
 
 document.addEventListener('input', (e) => {
