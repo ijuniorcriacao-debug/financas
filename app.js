@@ -634,6 +634,7 @@ const actions = {
     editing = null;
     txForm({ kind: 'acerto', desc: 'Acerto de contas', cents: s.owes, date: d.startsWith(ui.ym) ? d : `${ui.ym}-${pad(daysIn(ui.ym))}`, payer: s.debtor });
   },
+  'change-pass': () => gateNewPassword(false),
   logout: async () => {
     try { await sb.auth.signOut(); } catch (e) { /* segue */ }
     location.reload();
@@ -705,6 +706,7 @@ function accountCard() {
   return `<div class="card"><h3>Conta e sincronização</h3>
     <p class="muted">Conectado como <b>${esc(cloudEmail)}</b>. Tudo é salvo online e aparece no celular do parceiro em segundos. Gastos marcados como "só eu" ficam escondidos dele no servidor.</p>
     <div class="grid2"><button data-a="export">Backup (arquivo)</button><button data-a="csv">Planilha (CSV)</button></div>
+    <button data-a="change-pass" style="width:100%;margin-top:8px">Trocar minha senha</button>
     <button class="danger" data-a="logout" style="width:100%;margin-top:8px">Sair da conta</button></div>`;
 }
 const offlineBanner = () => (CLOUD && cloudOffline ? '<div class="insight warn">Sem conexão. Você vê o último estado salvo; o que lançar agora será enviado quando a internet voltar.</div>' : '');
@@ -829,8 +831,17 @@ function gateAuth(mode = 'login', msg = '') {
       <label>Senha ${login ? '' : '(mínimo 6 caracteres)'}</label><input name="pass" type="password" minlength="6" required autocomplete="${login ? 'current-password' : 'new-password'}">
       <div class="actions"><button class="primary" type="submit">${login ? 'Entrar' : 'Criar conta'}</button></div>
       <p class="muted" id="auth-msg">${esc(msg)}</p></form>
-    <button class="link" id="auth-switch" type="button">${login ? 'Primeira vez? Criar conta' : 'Já tenho conta — entrar'}</button>`);
+    <button class="link" id="auth-switch" type="button">${login ? 'Primeira vez? Criar conta' : 'Já tenho conta — entrar'}</button>
+    ${login ? '<button class="link" id="auth-forgot" type="button">Esqueci a senha</button>' : ''}`);
   $('#auth-switch').onclick = () => gateAuth(login ? 'signup' : 'login');
+  if (login) $('#auth-forgot').onclick = async () => {
+    const email = $('#auth-form').elements.email.value.trim();
+    const out = $('#auth-msg');
+    if (!email) { out.textContent = 'Digite seu e-mail no campo acima e toque de novo em "Esqueci a senha".'; return; }
+    out.textContent = 'Enviando…';
+    const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname });
+    out.textContent = error ? 'Não foi possível enviar agora: ' + (error.message || error) : 'Se o e-mail estiver cadastrado, enviamos um link para criar uma nova senha. Olhe também o spam.';
+  };
   $('#auth-form').onsubmit = async (e) => {
     e.preventDefault();
     const f = e.target, btn = f.querySelector('button.primary'), out = $('#auth-msg');
@@ -868,6 +879,26 @@ function gateHousehold(msg = '') {
   $('#hh-join').onsubmit = run('join_household', (f) => ({ p_code: f.elements.code.value, p_name: f.elements.name.value, p_income: parseMoney(f.elements.income.value) }));
 }
 
+function gateNewPassword(recovery) {
+  const form = `<h1>${recovery ? 'Crie uma nova senha' : 'Trocar senha'}</h1><p class="muted">Use pelo menos 6 caracteres.</p>
+    <form id="pw-form" class="card"><label>Nova senha</label><input name="p1" type="password" minlength="6" required autocomplete="new-password">
+      <label>Repita a nova senha</label><input name="p2" type="password" minlength="6" required autocomplete="new-password">
+      <div class="actions"><button class="primary" type="submit">Salvar senha</button></div><p class="muted" id="pw-msg"></p></form>
+    ${recovery ? '' : '<button class="link" id="pw-cancel" type="button">Voltar</button>'}`;
+  showGate(form);
+  if (!recovery) $('#pw-cancel').onclick = () => render();
+  $('#pw-form').onsubmit = async (e) => {
+    e.preventDefault();
+    const f = e.target, out = $('#pw-msg');
+    if (f.elements.p1.value !== f.elements.p2.value) { out.textContent = 'As duas senhas precisam ser iguais.'; return; }
+    f.querySelector('button.primary').disabled = true;
+    const { error } = await sb.auth.updateUser({ password: f.elements.p1.value });
+    if (error) { out.textContent = 'Não foi possível trocar: ' + (error.message || error); f.querySelector('button.primary').disabled = false; return; }
+    toast('Senha atualizada ✔');
+    if (recovery) { history.replaceState(null, '', location.pathname); await enter(); } else render();
+  };
+}
+
 async function enter(session) {
   if (!session) session = (await sb.auth.getSession()).data.session;
   if (!session) return gateAuth();
@@ -884,9 +915,14 @@ async function enter(session) {
 async function boot() {
   if (!CLOUD) { render(); return; }
   if (!window.supabase) { showGate('<h1>Sem conexão com o servidor</h1><p class="muted">Não foi possível carregar o necessário para entrar. Verifique a internet e tente de novo.</p><button class="primary" onclick="location.reload()">Tentar de novo</button>'); return; }
+  const cameFromRecovery = /type=recovery/.test(location.hash);
   sb = window.supabase.createClient(CFG.url, CFG.key);
   sb.auth.onAuthStateChange((ev) => { if (ev === 'SIGNED_OUT') { hid = null; channel = null; gateAuth(); } });
-  await enter();
+  if (cameFromRecovery) {
+    const { data } = await sb.auth.getSession();
+    if (data.session) { cloudUid = data.session.user.id; cloudEmail = data.session.user.email || ''; gateNewPassword(true); }
+    else await enter();
+  } else await enter();
   document.addEventListener('visibilitychange', () => { if (!document.hidden && hid) cloudRefreshSoon(); });
   window.addEventListener('online', () => { if (hid) cloudRefresh(); });
 }
