@@ -48,3 +48,10 @@ dos gastos "só meu" garantida **no servidor**.
   `ANTHROPIC_API_KEY` (obrigatório), `ALLOWED_EMAILS` (e-mails dos dois, separados por vírgula),
   `AI_MODEL` (opcional). Sem a chave, o app avisa que a IA não foi ativada; PDFs digitais seguem funcionando.
 - Recomendado depois que os dois criarem conta: Authentication → desligar "Allow new users to sign up".
+
+## Forma de pagamento e parcelas
+- `tx.method` (`conta` | `dinheiro` | `cartao`), `tx.inst_no` e `tx.inst_total` (parcela atual / total, só no cartão).
+- No app: ao lançar no cartão parcelado ("parcela 3 de 10"), o app lança a 3/10 e as 7 seguintes, uma por mês.
+- **Cópia diária do banco (a terminar):** a tabela `public.backups` já existe (vazia, sem acesso para os usuários do app).
+  Falta criar a função `take_backup()` e agendar com `pg_cron`; as chamadas de DDL com corpo de função estouraram o
+  tempo no conector. Tentar de novo (função em pedaços menores) ou rodar `schema.sql` pelo SQL Editor.

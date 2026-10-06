@@ -2,6 +2,8 @@
 /* Finanças da Casa — app sem dependências. Valores sempre em centavos (inteiros). */
 
 const KEY = 'financas-casa-v1';
+const METHODS = { conta: 'Conta corrente / Pix', dinheiro: 'Dinheiro', cartao: 'Cartão de crédito' };
+const METHOD_SHORT = { conta: 'Conta', dinheiro: 'Dinheiro', cartao: 'Cartão' };
 const NATURES = { fixa: 'Fixa', variavel: 'Variável', esporadica: 'Esporádica' };
 const DEFAULT_CATS = [
   { id: 'moradia', name: 'Moradia', emoji: '🏠', essential: true },
@@ -219,6 +221,8 @@ function viewResumo() {
   const data = months.map((m) => ({ m, inc: monthIncome(m).total, exp: sum(expenses(houseTx(m))) }));
   const maxV = Math.max(1, ...data.map((d) => Math.max(d.inc, d.exp)));
 
+  const byMethod = {}; exp.forEach((t) => { const m = t.method || 'conta'; byMethod[m] = (byMethod[m] || 0) + t.cents; });
+  const futureCard = sum(expenses(S.tx.filter((t) => !isPersonal(t) && t.method === 'cartao' && t.instTotal && ymOf(t.date) > ui.ym)));
   const teto = inc.total - goal;
   const sev = used > 1 ? 'bad' : spent > teto ? 'warn' : '';
   const capPos = inc.total > 0 ? Math.min(100, (teto / inc.total) * 100) : 100;
@@ -246,6 +250,10 @@ function viewResumo() {
   <h2>Tipo de gasto</h2>
   <div class="stack" role="img" aria-label="Fixas, variáveis e esporádicas">${['fixa', 'variavel', 'esporadica'].map((k, i) => (nat[k] ? `<i class="n${i}" style="flex:${nat[k]}"></i>` : '')).join('')}${natTotal ? '' : '<i style="flex:1;background:var(--track)"></i>'}</div>
   <div class="legend3">${['fixa', 'variavel', 'esporadica'].map((k, i) => `<div class="it"><div class="k"><span class="sw n${i}"></span>${NATURES[k]}s</div><div class="v">${brl0(nat[k] || 0)}</div><div class="p">${natTotal ? pct((nat[k] || 0) / natTotal) : '0%'}</div></div>`).join('')}</div>
+
+  <h2>Como foi pago</h2>
+  <div class="legend3">${['conta', 'dinheiro', 'cartao'].map((k, i) => `<div class="it"><div class="k"><span class="sw n${i}"></span>${METHOD_SHORT[k]}</div><div class="v">${brl0(byMethod[k] || 0)}</div><div class="p">${spent ? pct((byMethod[k] || 0) / spent) : '0%'}</div></div>`).join('')}</div>
+  ${futureCard > 0 ? `<p class="muted" style="margin-top:10px">No cartão, as parcelas já lançadas para os próximos meses somam <b>${brl(futureCard)}</b>.</p>` : ''}
 
   <h2>Para onde foi o dinheiro</h2>
   ${cats.length ? cats.map((c) => {
@@ -355,7 +363,7 @@ function renderList() {
       <div class="emo">${k.emoji}</div>
       <div class="grow">
         <div class="ellipsis"><b>${esc(t.desc)}</b></div>
-        <div class="meta">${dayLabel(t.date)} · ${who}${t.kind === 'despesa' ? ` · <span class="tag">${NATURES[t.nature]}</span>` : ''}</div></div>
+        <div class="meta">${dayLabel(t.date)} · ${who}${t.kind === 'despesa' ? ` · <span class="tag">${NATURES[t.nature]}</span>${t.method ? ` <span class="tag">${METHOD_SHORT[t.method]}${t.instTotal ? ` ${t.instNo}/${t.instTotal}` : ''}</span>` : ''}` : ''}</div></div>
       <div style="text-align:right"><div class="amt ${t.kind === 'despesa' ? '' : 'good'}">${sign}&nbsp;${brl(t.cents)}</div>
         ${t.nature === 'fixa' && t.kind === 'despesa' && mine ? `<label class="chk"><input type="checkbox" data-c="paid" data-v="${t.id}" ${t.paid ? 'checked' : ''}> pago</label>` : ''}</div>
     </div>`;
@@ -486,13 +494,19 @@ function txForm(t) {
     <div class="grid2"><div><label id="l-val">Valor (R$)</label><input name="val" inputmode="decimal" value="${t.cents ? num(t.cents) : ''}" required placeholder="0,00"></div>
       <div><label>Data</label><input name="date" type="date" value="${t.date}" required></div></div>
     <div id="exp-fields" ${t.kind === 'despesa' ? '' : 'hidden'}>
+      <label>Como foi pago</label>${seg('method', Object.entries(METHODS), t.method || 'conta')}
+      <div id="card-fields" ${t.method === 'cartao' ? '' : 'hidden'}>
+        <label>Compra no cartão</label>${seg('parc', [['nao', 'À vista'], ['sim', 'Parcelada']], t.instTotal ? 'sim' : 'nao')}
+        <div id="parc-fields" ${t.instTotal ? '' : 'hidden'}>
+          <div class="grid2"><div><label>Parcela que estou pagando</label><input name="inst_no" type="number" inputmode="numeric" min="1" max="120" value="${t.instNo || 1}"></div>
+            <div><label>Total de parcelas</label><input name="inst_total" type="number" inputmode="numeric" min="2" max="120" value="${t.instTotal || 2}"></div></div>
+          <p class="muted" id="parc-help"></p></div></div>
       <label>Categoria</label><select name="cat">${catOptions(t.cat)}</select>
       <label>Tipo de gasto</label>${seg('nature', Object.entries(NATURES).map(([k, l]) => [k, l]), t.nature)}
       <label>Onde entra</label>${seg('split', [['shared', 'Casa (divide pela renda)'], ['personal', 'Pessoal (só meu)']], t.split)}
       <div id="vis-fields" ${t.split === 'personal' ? '' : 'hidden'}><label>Quem pode ver</label>${seg('vis', [['open', 'Parceiro vê'], ['private', 'Só eu']], t.vis || 'open')}</div>
     </div>
     <label id="l-payer">${t.kind === 'receita' ? 'Quem recebeu' : t.split === 'personal' ? 'De quem é o gasto' : 'Quem pagou'}</label><select name="payer">${payerOptions(t.payer, t.kind === 'despesa' && t.split !== 'personal', t.kind === 'despesa' && t.split === 'personal')}</select>
-    ${isNew ? `<div id="inst" ${t.kind === 'despesa' ? '' : 'hidden'}><label>Parcelas (meses seguidos, opcional)</label><input name="n" type="number" min="1" max="60" value="1"></div>` : ''}
     <div class="actions">${isNew ? '' : '<button type="button" class="danger" data-a="del-tx">Excluir</button>'}<button class="primary" type="submit">Salvar</button></div>
   </form>`);
   const f = $('#tx-form');
@@ -502,13 +516,26 @@ function txForm(t) {
     const sp = f.querySelector('[name=split]:checked');
     const personalSel = k === 'despesa' && !!sp && sp.value === 'personal';
     $('#vis-fields').hidden = !personalSel;
-    const inst = $('#inst'); if (inst) inst.hidden = k !== 'despesa';
+    const mth = f.querySelector('[name=method]:checked');
+    const isCard = k === 'despesa' && !!mth && mth.value === 'cartao';
+    $('#card-fields').hidden = !isCard;
+    const parc = isCard && f.querySelector('[name=parc]:checked').value === 'sim';
+    $('#parc-fields').hidden = !parc;
+    $('#l-val').textContent = parc ? 'Valor da parcela (R$)' : 'Valor (R$)';
+    if (parc) {
+      const no = +f.elements.inst_no.value || 0, tot = +f.elements.inst_total.value || 0, left = tot - no;
+      $('#parc-help').textContent = no < 1 || tot < 2 || no > tot ? 'Confira os números: a parcela atual não pode ser maior que o total.'
+        : isNew ? (left > 0 ? `Vou lançar esta parcela (${no}/${tot}) e mais ${left} nos próximos meses, até a ${tot}/${tot}. Faltam ${left} depois desta.` : `Esta é a última parcela (${no}/${tot}).`)
+        : `Só esta parcela será alterada. Depois dela faltam ${Math.max(left, 0)}.`;
+    }
     const sel = f.elements.payer, cur = sel.value;
     const joint = k === 'despesa' && !personalSel;
     sel.innerHTML = payerOptions(cur === 'joint' && !joint ? (CLOUD ? S.me : 0) : cur, joint, personalSel);
     $('#l-payer').textContent = k === 'receita' ? 'Quem recebeu' : k === 'acerto' ? 'Quem transferiu' : personalSel ? 'De quem é o gasto' : 'Quem pagou';
   };
   f.addEventListener('change', sync);
+  f.addEventListener('input', sync);
+  sync();
   f.addEventListener('submit', (e) => {
     e.preventDefault();
     const kind = t.kind === 'acerto' ? 'acerto' : val(f, 'kind');
@@ -522,13 +549,23 @@ function txForm(t) {
       base.split = payer === 'joint' ? 'shared' : f.querySelector('[name=split]:checked').value;
       base.vis = base.split === 'personal' ? f.querySelector('[name=vis]:checked').value : undefined;
       if (base.nature === 'fixa' && base.paid === undefined) base.paid = true;
+      base.method = f.querySelector('[name=method]:checked').value;
+      base.instNo = undefined; base.instTotal = undefined;
+      if (base.method === 'cartao' && f.querySelector('[name=parc]:checked').value === 'sim') {
+        const no = +f.elements.inst_no.value, tot = +f.elements.inst_total.value;
+        if (!(tot >= 2 && tot <= 120 && no >= 1 && no <= tot)) { toast('Confira as parcelas: a atual não pode passar do total'); return; }
+        base.instNo = no; base.instTotal = tot;
+      }
     }
     if (isNew) {
-      const n = Math.max(1, Math.min(60, +(f.elements.n?.value) || 1));
-      const group = n > 1 ? uid() : undefined;
-      for (let i = 0; i < n; i++) {
-        S.tx.push({ ...base, id: uid(), group, date: addMonthsToDate(base.date, i), desc: n > 1 ? `${base.desc} (${i + 1}/${n})` : base.desc });
-      }
+      if (base.instTotal) {
+        // lança a parcela atual e as que faltam, uma por mês
+        const group = uid();
+        for (let i = 0; i <= base.instTotal - base.instNo; i++) {
+          const no = base.instNo + i;
+          S.tx.push({ ...base, id: uid(), group, instNo: no, date: addMonthsToDate(base.date, i), desc: `${base.desc} (${no}/${base.instTotal})`, paid: true });
+        }
+      } else S.tx.push({ ...base, id: uid() });
     } else {
       S.tx = S.tx.map((x) => (x.id === t.id ? base : x));
     }
@@ -539,7 +576,7 @@ function txForm(t) {
 function newTx() {
   const d = todayStr();
   const own = ui.who !== 'casa';
-  txForm({ kind: 'despesa', desc: '', cents: 0, date: d.startsWith(ui.ym) ? d : `${ui.ym}-01`, cat: own ? 'esporte' : 'mercado', nature: 'variavel', split: own ? 'personal' : 'shared', vis: 'open', payer: own ? ui.who : (CLOUD ? S.me : 0) });
+  txForm({ kind: 'despesa', desc: '', cents: 0, date: d.startsWith(ui.ym) ? d : `${ui.ym}-01`, cat: own ? 'esporte' : 'mercado', nature: 'variavel', split: own ? 'personal' : 'shared', vis: 'open', method: 'conta', payer: own ? ui.who : (CLOUD ? S.me : 0) });
 }
 
 function tplForm(t) {
@@ -642,9 +679,9 @@ const actions = {
   export: () => download(`financas-casa-${todayStr()}.json`, JSON.stringify(S, null, 2), 'application/json'),
   import: () => $('#file').click(),
   csv: () => {
-    const rows = [['data', 'tipo', 'descricao', 'valor', 'categoria', 'natureza', 'pagou', 'divisao', 'pago']];
+    const rows = [['data', 'tipo', 'descricao', 'valor', 'categoria', 'natureza', 'pagou', 'divisao', 'pago', 'forma_pagamento', 'parcela']];
     S.tx.slice().sort((a, b) => a.date.localeCompare(b.date)).forEach((t) => rows.push([t.date, t.kind, t.desc, (t.cents / 100).toFixed(2).replace('.', ','),
-      t.kind === 'despesa' ? cat(t.cat).name : '', t.kind === 'despesa' ? NATURES[t.nature] : '', pName(t.payer), t.split || '', t.paid ? 'sim' : '']));
+      t.kind === 'despesa' ? cat(t.cat).name : '', t.kind === 'despesa' ? NATURES[t.nature] : '', pName(t.payer), t.split || '', t.paid ? 'sim' : '', t.method ? METHODS[t.method] : '', t.instTotal ? `${t.instNo}/${t.instTotal}` : '']));
     download(`financas-casa-${todayStr()}.csv`, '﻿' + rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(';')).join('\n'), 'text/csv');
   },
   reset: () => {
@@ -722,8 +759,8 @@ let snap = { tx: {}, tpl: {}, cats: {}, me: '', pct: -1 };
 let pushTimer = null, chain = Promise.resolve(), channel = null;
 const isNetErr = (e) => /fetch|network|offline|timeout/i.test(String((e && e.message) || e)) || !navigator.onLine;
 
-const rowTx = (t) => ({ id: t.id, household_id: hid, kind: t.kind, date: t.date, descr: t.desc, cents: t.cents, cat: t.cat ?? null, nature: t.nature ?? null, payer: String(t.payer), split: t.split ?? null, vis: t.vis ?? null, paid: !!t.paid, tpl_id: t.tplId ?? null, grp: t.group ?? null });
-const fromTx = (r) => ({ id: r.id, kind: r.kind, date: r.date, desc: r.descr, cents: Number(r.cents), cat: r.cat ?? undefined, nature: r.nature ?? undefined, payer: r.payer === 'joint' ? 'joint' : +r.payer, split: r.split ?? undefined, vis: r.vis ?? undefined, paid: r.paid, tplId: r.tpl_id ?? undefined, group: r.grp ?? undefined });
+const rowTx = (t) => ({ id: t.id, household_id: hid, kind: t.kind, date: t.date, descr: t.desc, cents: t.cents, cat: t.cat ?? null, nature: t.nature ?? null, payer: String(t.payer), split: t.split ?? null, vis: t.vis ?? null, paid: !!t.paid, tpl_id: t.tplId ?? null, grp: t.group ?? null, method: t.method ?? null, inst_no: t.instNo ?? null, inst_total: t.instTotal ?? null });
+const fromTx = (r) => ({ id: r.id, kind: r.kind, date: r.date, desc: r.descr, cents: Number(r.cents), cat: r.cat ?? undefined, nature: r.nature ?? undefined, payer: r.payer === 'joint' ? 'joint' : +r.payer, split: r.split ?? undefined, vis: r.vis ?? undefined, paid: r.paid, tplId: r.tpl_id ?? undefined, group: r.grp ?? undefined, method: r.method ?? undefined, instNo: r.inst_no ?? undefined, instTotal: r.inst_total ?? undefined });
 const rowTpl = (t) => ({ id: t.id, household_id: hid, descr: t.desc, cents: t.cents, day: t.day, cat: t.cat, payer: String(t.payer), split: t.split, vis: t.vis ?? null, active: !!t.active, start_ym: t.start });
 const fromTpl = (r) => ({ id: r.id, desc: r.descr, cents: Number(r.cents), day: r.day, cat: r.cat, payer: r.payer === 'joint' ? 'joint' : +r.payer, split: r.split, vis: r.vis ?? undefined, active: r.active, start: r.start_ym });
 const rowCat = (c) => ({ household_id: hid, id: c.id, name: c.name, emoji: c.emoji, essential: !!c.essential, budget_cents: c.budget || 0 });

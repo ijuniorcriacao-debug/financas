@@ -92,7 +92,8 @@ function parseStatementText(text, today = todayStr()) {
   let spend = rows.filter((r) => (tipo === 'fatura' ? !r.negative && !r.credit : r.negative));
   let note = '';
   if (!spend.length && tipo === 'extrato' && rows.some((r) => !r.credit)) { spend = rows.filter((r) => !r.credit); note = 'Não achei sinal de débito nas linhas; considerei todas como gastos. Confira.'; }
-  return { tipo, note, skipped: rows.length - spend.length, items: spend.map((r) => ({ date: r.date, desc: r.desc, cents: r.cents, cat: guessCat(r.desc) })) };
+  const inst = (d) => { const m = d.match(/(?:^|\s)(\d{1,2})\/(\d{1,2})\s*$/); return m && +m[2] >= 2 && +m[1] >= 1 && +m[1] <= +m[2] ? { instNo: +m[1], instTotal: +m[2] } : {}; };
+  return { tipo, note, skipped: rows.length - spend.length, items: spend.map((r) => ({ date: r.date, desc: r.desc, cents: r.cents, cat: guessCat(r.desc), ...(tipo === 'fatura' ? inst(r.desc) : {}) })) };
 }
 
 /* ---------- PDF (pdf.js carregado só quando precisa) ---------- */
@@ -178,12 +179,13 @@ async function importDocs(fileList) {
   if (!files.length) return;
   openSheet('<div class="big"><div class="v">⏳</div><p><b>Lendo o arquivo…</b></p><p class="muted">PDF digital é lido aqui no celular. Fotos vão para a IA e podem levar alguns segundos.</p></div>');
   const items = [], notes = [];
+  let defaultMethod = 'conta';
   for (const f of files) {
     try {
       const isPdf = f.type === 'application/pdf' || /\.pdf$/i.test(f.name);
       if (isPdf) {
         const r = parseStatementText((await pdfLines(f)).join('\n'));
-        if (r.items.length) { items.push(...r.items); notes.push(`${f.name}: ${r.items.length} lançamentos (${r.tipo}).${r.note ? ' ' + r.note : ''}`); continue; }
+        if (r.items.length) { if (r.tipo === 'fatura') defaultMethod = 'cartao'; items.push(...r.items); notes.push(`${f.name}: ${r.items.length} lançamentos (${r.tipo}).${r.note ? ' ' + r.note : ''}`); continue; }
         if (f.size > AI_MAX_BYTES) throw new Error('Não achei lançamentos no texto e o PDF é grande demais para a IA (máx. ~6 MB).');
         notes.push(`${f.name}: sem texto legível, li com a IA.`);
         items.push(...await aiExtract('application/pdf', await fileB64(f)));
@@ -196,7 +198,7 @@ async function importDocs(fileList) {
     } catch (e) { notes.push(`${f.name}: ${e.message || e}`); }
   }
   if (!items.length) { openImportEmpty(notes); return; }
-  openImport(markDuplicates(items), notes);
+  openImport(markDuplicates(items), notes, defaultMethod);
 }
 function openImportEmpty(notes) {
   openSheet(`<h2 style="margin-top:0">Não consegui ler gastos</h2>${notes.map((n) => `<p class="muted">${esc(n)}</p>`).join('')}
@@ -204,9 +206,9 @@ function openImportEmpty(notes) {
   $('#imp-close').onclick = closeSheet;
 }
 
-function openImport(items, notes) {
+function openImport(items, notes, defaultMethod = 'conta') {
   const own = ui.who !== 'casa';
-  const st = { items: items.map((it) => ({ ...it, on: !it.dup })), split: own ? 'personal' : 'shared', vis: 'open', nature: 'variavel', payer: own ? String(ui.who) : (CLOUD ? String(S.me) : '0') };
+  const st = { items: items.map((it) => ({ ...it, on: !it.dup })), split: own ? 'personal' : 'shared', vis: 'open', nature: 'variavel', method: defaultMethod, payer: own ? String(ui.who) : (CLOUD ? String(S.me) : '0') };
   const rowHtml = (it, i) => `<div class="imp-row ${it.dup ? 'dup' : ''}"><label class="imp-on"><input type="checkbox" data-f="on" data-i="${i}" ${it.on ? 'checked' : ''}></label>
     <div class="grow"><input data-f="desc" data-i="${i}" value="${esc(it.desc)}" maxlength="80">
       <div class="imp-line"><input type="date" data-f="date" data-i="${i}" value="${esc(it.date)}"><input data-f="val" data-i="${i}" inputmode="decimal" value="${num(it.cents)}"><select data-f="cat" data-i="${i}">${catOptions(it.cat)}</select></div>
@@ -217,7 +219,8 @@ function openImport(items, notes) {
       <label>Onde entram</label>${seg('imp-split', [['shared', 'Casa'], ['personal', 'Pessoal']], st.split)}
       <div id="imp-vis" ${st.split === 'personal' ? '' : 'hidden'}><label>Quem pode ver</label>${seg('imp-vis', [['open', 'Parceiro vê'], ['private', 'Só eu']], st.vis)}</div>
       <div class="grid2"><div><label id="imp-l-payer">Quem pagou</label><select id="imp-payer"></select></div>
-        <div><label>Tipo de gasto</label><select id="imp-nature">${Object.entries(NATURES).map(([k, l]) => `<option value="${k}" ${k === st.nature ? 'selected' : ''}>${l}</option>`).join('')}</select></div></div>
+        <div><label>Como foi pago</label><select id="imp-method">${Object.entries(METHODS).map(([k, l]) => `<option value="${k}" ${k === st.method ? 'selected' : ''}>${l}</option>`).join('')}</select></div></div>
+      <div class="grid2"><div><label>Tipo de gasto</label><select id="imp-nature">${Object.entries(NATURES).map(([k, l]) => `<option value="${k}" ${k === st.nature ? 'selected' : ''}>${l}</option>`).join('')}</select></div></div>
     </div>
     <div class="row" style="margin-top:12px"><b id="imp-count"></b><button class="link" id="imp-all" type="button">marcar/desmarcar todos</button></div>
     <div id="imp-list">${st.items.map(rowHtml).join('')}</div>
@@ -245,6 +248,7 @@ function openImport(items, notes) {
     else if (el.name === 'imp-vis') st.vis = el.value;
     else if (el.id === 'imp-payer') st.payer = el.value;
     else if (el.id === 'imp-nature') st.nature = el.value;
+    else if (el.id === 'imp-method') st.method = el.value;
     else if (el.dataset.f) {
       const it = st.items[+el.dataset.i], f = el.dataset.f;
       if (f === 'on') it.on = el.checked;
@@ -264,7 +268,7 @@ function openImport(items, notes) {
     const payer = st.split === 'personal' ? (CLOUD ? S.me : +st.payer) : (st.payer === 'joint' ? 'joint' : +st.payer);
     const rules = readRules();
     sel.forEach((x) => {
-      S.tx.push({ id: uid(), kind: 'despesa', date: x.date, desc: x.desc.trim().slice(0, 80), cents: x.cents, cat: x.cat, nature: st.nature, payer, split: st.split, vis: st.split === 'personal' ? st.vis : undefined, paid: true });
+      S.tx.push({ id: uid(), kind: 'despesa', date: x.date, desc: x.desc.trim().slice(0, 80), cents: x.cents, cat: x.cat, nature: st.nature, method: st.method, instNo: st.method === 'cartao' ? x.instNo : undefined, instTotal: st.method === 'cartao' ? x.instTotal : undefined, payer, split: st.split, vis: st.split === 'personal' ? st.vis : undefined, paid: true });
       rules[normKey(x.desc)] = x.cat;
     });
     saveRules(rules);

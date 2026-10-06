@@ -227,3 +227,12 @@ begin
 end $$;
 revoke all on function public.take_ai_quota(int) from public, anon;
 grant execute on function public.take_ai_quota(int) to authenticated;
+
+-- ------------------------------------------- forma de pagamento e parcelas (cartão)
+alter table public.tx add column if not exists method text;
+alter table public.tx add column if not exists inst_no smallint;
+alter table public.tx add column if not exists inst_total smallint;
+alter table public.tx drop constraint if exists tx_method_check;
+alter table public.tx add constraint tx_method_check check (method is null or method in ('conta', 'dinheiro', 'cartao'));
+alter table public.tx drop constraint if exists tx_inst_check;
+alter table public.tx add constraint tx_inst_check check ((inst_no is null and inst_total is null) or (inst_total between 2 and 120 and inst_no between 1 and inst_total));
