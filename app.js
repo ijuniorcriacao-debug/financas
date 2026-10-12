@@ -423,7 +423,8 @@ function makePlan(label, debtor, total, n, first, done = 0) {
 function itemsBlock(planId, planTotal) {
   const its = S.planItems.filter((i) => i.planId === planId).sort((a, b) => a.date.localeCompare(b.date));
   const sumI = its.reduce((a, i) => a + i.cents, 0);
-  return `<details class="tbl" ${its.length ? '' : ''}><summary>Itens do combinado (${its.length}) · ${brl(sumI)}</summary>
+  return `<details class="tbl" open><summary><b>Tudo que foi somado (${its.length})</b> · ${brl(sumI)}</summary>
+    ${its.length ? '' : '<p class="muted">Nada lançado ainda. Use o botão acima ou mande linhas de uma fatura em PDF para este combinado.</p>'}
     ${its.map((i) => `<div class="plan-row"><div class="grow"><b>${esc(i.desc)}</b><div class="muted">${dayLabel(i.date)}</div></div><div class="amt-col"><div class="amt">${brl(i.cents)}</div><div class="plan-act"><button type="button" class="link danger" data-a="item-del" data-v="${i.id}">remover</button></div></div></div>`).join('')}
     ${its.length && sumI !== planTotal ? `<p class="muted warn">Os itens somam ${brl(sumI)} e as parcelas somam ${brl(planTotal)}.</p>${S.plans.some((p) => p.planId === planId && !p.paid) ? `<button type="button" data-a="plan-resync" data-v="${planId}">Ajustar as parcelas em aberto ao total dos itens</button>` : ''}` : ''}
     <button type="button" data-a="item-add" data-v="${planId}" style="margin-top:8px">Adicionar item</button></details>`;
@@ -1159,7 +1160,7 @@ async function boot() {
 boot();
 
 /* ---------- atualização do app ---------- */
-const APP_VERSION = 'v14';
+const APP_VERSION = 'v15';
 let swReg = null, updateWorker = null, userUpdating = false;
 function showUpdateBar(worker) {
   updateWorker = worker;
