@@ -441,7 +441,8 @@ function resyncPlan(planId) {
 function itemForm(planId) {
   openSheet(`<h2 style="margin-top:0">Item do combinado</h2>
   <form id="item-form"><label>O que foi pago</label><input name="desc" required maxlength="80" placeholder="Ex.: Mercado, parcela do cartão…">
-    <div class="grid2"><div><label>Valor (R$)</label><input name="val" inputmode="decimal" required placeholder="0,00"></div><div><label>Data</label><input name="date" type="date" value="${todayStr()}" required></div></div>
+    <div class="grid2"><div><label>Valor (R$)</label><input name="val" inputmode="decimal" required placeholder="0,00"></div><div><label>Data da compra</label><input name="date" type="date" value="${todayStr()}" required></div></div>
+    <p class="muted">Pode ser de meses anteriores (retroativo): o item só soma no total do combinado e <b>não entra na divisão de nenhum mês</b>.</p>
     ${S.plans.some((p) => p.planId === planId && !p.paid) ? '<label class="chk" style="display:flex;gap:8px;align-items:center;margin:10px 0"><input type="checkbox" name="resync" checked style="width:auto"> Somar ao valor das parcelas em aberto</label>' : ''}
     <p class="muted">Registra mais uma coisa dentro deste combinado. Marcado, o valor é dividido nas parcelas que ainda faltam; desmarcado, só fica registrado.</p>
     <div class="actions"><button type="button" id="item-cancel">Cancelar</button><button class="primary" type="submit">Adicionar</button></div></form>`);
@@ -1158,7 +1159,7 @@ async function boot() {
 boot();
 
 /* ---------- atualização do app ---------- */
-const APP_VERSION = 'v13';
+const APP_VERSION = 'v14';
 let swReg = null, updateWorker = null, userUpdating = false;
 function showUpdateBar(worker) {
   updateWorker = worker;
