@@ -257,3 +257,17 @@ body.gate nav#tabs, body.gate #fab { display: none; }
 
 #update-bar { position: fixed; left: 0; right: 0; top: 0; z-index: 60; display: flex; align-items: center; justify-content: center; gap: 12px; padding: calc(10px + env(safe-area-inset-top, 0px)) 16px 10px; background: var(--brand); color: var(--brand-ink); font-weight: 600; font-size: .9375rem; }
 #update-bar button { background: var(--brand-ink); color: var(--brand); border: 0; padding: 7px 14px; font-weight: 700; }
+
+.imp-dest { margin-top: 6px; padding: 8px; font-size: .8125rem; }
+
+.plan-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line); }
+.plan-row.done { opacity: .6; }
+.plan-row .amt-col { text-align: right; flex: none; }
+.plan-row .amt { font-weight: 700; font-variant-numeric: tabular-nums; }
+.plan-row .plan-act { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; align-items: center; margin-top: 4px; }
+.plan-row .plan-act button:not(.link) { padding: 5px 10px; font-size: .8125rem; }
+.plan-row .plan-act .link { font-size: .8125rem; padding: 2px; }
+
+.pi-row { display: grid; grid-template-columns: 1fr 1fr auto; grid-template-areas: 'desc desc desc' 'date val rm'; gap: 6px; margin: 10px 0; }
+.pi-row [data-p=desc] { grid-area: desc; } .pi-row [data-p=date] { grid-area: date; } .pi-row [data-p=val] { grid-area: val; } .pi-row [data-p=rm] { grid-area: rm; }
+.pi-row input { padding: 9px 8px; font-size: .8125rem; min-width: 0; }

@@ -70,6 +70,8 @@ function defaultState() {
     cats: DEFAULT_CATS.map((c) => ({ ...c, budget: 0 })),
     tx: [],
     tpl: [],
+    plans: [],
+    planItems: [],
   };
 }
 const CFG = window.SUPABASE_CONFIG || {};
@@ -168,7 +170,7 @@ function render() {
   if (CLOUD && ui.who !== 'casa' && ui.who !== S.me) ui.who = 'casa';
   if (!S.setup && !CLOUD) { openSetup(); }
   ensureFixed(ui.ym);
-  const views = { resumo: viewResumo, lanc: () => viewLanc('Lançamentos'), divisao: viewDivisao, plano: viewPlano, ajustes: viewAjustes, meu: viewMeu, meus: () => viewLanc('Meus gastos') };
+  const views = { resumo: viewResumo, lanc: () => viewLanc('Lançamentos'), divisao: viewDivisao, pend: viewPend, plano: viewPlano, ajustes: viewAjustes, meu: viewMeu, meus: () => viewLanc('Meus gastos') };
   if (!tabsFor().some((t) => t[0] === ui.tab)) ui.tab = tabsFor()[0][0];
   $('#view').innerHTML = offlineBanner() + whoBar() + views[ui.tab]();
   if (ui.tab === 'lanc' || ui.tab === 'meus') renderList();
@@ -183,10 +185,11 @@ const ICON = {
   ajustes: '<path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/>',
   meu: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
   meus: '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2zM9 8h6M9 12h6"/>',
+  pend: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
 };
 const icon = (k) => `<svg viewBox="0 0 24 24" aria-hidden="true">${ICON[k]}</svg>`;
 const tabsFor = () => (ui.who === 'casa'
-  ? [['resumo', 'resumo', 'Resumo'], ['lanc', 'lanc', 'Lançamentos'], ['divisao', 'divisao', 'Divisão'], ['plano', 'plano', 'Plano'], ['ajustes', 'ajustes', 'Ajustes']]
+  ? [['resumo', 'resumo', 'Resumo'], ['lanc', 'lanc', 'Gastos'], ['divisao', 'divisao', 'Divisão'], ['pend', 'pend', 'A acertar'], ['plano', 'plano', 'Plano'], ['ajustes', 'ajustes', 'Ajustes']]
   : [['meu', 'meu', 'Meu resumo'], ['meus', 'meus', 'Meus gastos'], ['ajustes', 'ajustes', 'Ajustes']]);
 function whoBar() {
   const opts = CLOUD ? [['casa', 'Casa', 'home'], [S.me, S.people[S.me].name, 'p' + S.me]]
@@ -355,7 +358,7 @@ function renderList() {
   el.innerHTML = `<div class="muted">${list.length} lançamentos · ${ui.who === 'casa' ? 'despesas' : 'seus gastos'} ${brl(total)} · toque em um lançamento para editar ou excluir</div>` + list.map((t) => {
     const k = t.kind === 'despesa' ? cat(t.cat) : { emoji: t.kind === 'receita' ? '+' : '⇄' };
     const sign = t.kind === 'despesa' ? '−' : '+';
-    const mine = !isPersonal(t) || t.payer === ui.who;
+    const mine = !isPersonal(t) || t.payer === ui.who || (CLOUD && t.createdBy && t.createdBy === cloudUid);
     const who = t.kind === 'despesa'
       ? `<span class="pdot" style="background:${t.payer === 'joint' ? 'var(--ink-2)' : `var(--p${t.payer})`}"></span>${esc(pName(t.payer))} · ${t.split === 'shared' ? 'casa' : t.vis === 'private' ? 'só meu' : 'pessoal'}`
       : `<span class="pdot" style="background:var(--p${t.payer})"></span>${esc(pName(t.payer))}`;
@@ -370,6 +373,130 @@ function renderList() {
   }).join('');
 }
 
+
+/* ----- A acertar: combinados pagos em parcelas, fora do acerto do mês ----- */
+const dueLabel = (ym) => `${monthShort(ym)}/${ym.slice(0, 4)}`;
+function planGroups() {
+  const g = {};
+  S.plans.forEach((p) => { (g[p.planId] = g[p.planId] || []).push(p); });
+  return Object.values(g).map((a) => a.sort((x, y) => x.dueYm.localeCompare(y.dueYm))).sort((a, b) => a[0].dueYm.localeCompare(b[0].dueYm));
+}
+function planLine(p) {
+  const d = S.people[p.debtor].name, c = S.people[1 - p.debtor].name;
+  const inc = p.incYm ? `<span class="tag">entra no acerto de ${esc(dueLabel(p.incYm))}</span>` : '';
+  const act = p.paid
+    ? `<span class="muted">pago${p.paidOn ? ' em ' + dayLabel(p.paidOn) : ''}</span> <button type="button" class="link" data-a="plan-unpaid" data-v="${p.id}">desfazer</button>`
+    : `${p.incYm ? `<button type="button" class="link" data-a="plan-exc" data-v="${p.id}">tirar do acerto</button>` : `<button type="button" class="link" data-a="plan-inc" data-v="${p.id}">incluir no acerto de ${esc(dueLabel(ui.ym))}</button>`} <button type="button" data-a="plan-paid" data-v="${p.id}">Marcar pago</button>`;
+  return `<div class="plan-row ${p.paid ? 'done' : ''}"><div class="grow"><b>${p.no}/${p.total} · ${esc(dueLabel(p.dueYm))}</b> ${inc}<div class="muted">${esc(d)} paga ${esc(c)}</div></div><div class="amt-col"><div class="amt">${brl(p.cents)}</div><div class="plan-act">${act}</div></div></div>`;
+}
+function viewPend() {
+  const groups = planGroups();
+  const left = [0, 0];
+  S.plans.filter((p) => !p.paid).forEach((p) => { left[p.debtor] += p.cents; });
+  const net = left[0] - left[1];
+  const open = S.plans.filter((p) => !p.paid).length;
+  const nextDue = S.plans.filter((p) => !p.paid).sort((a, b) => a.dueYm.localeCompare(b.dueYm))[0];
+  const summary = !S.plans.length ? '' : net === 0 && !open
+    ? '<div class="insight">Nada pendente: todas as parcelas combinadas foram pagas.</div>'
+    : `<div class="hero" style="padding-bottom:14px"><div class="lbl">${net >= 0 ? esc(S.people[0].name) + ' ainda deve a ' + esc(S.people[1].name) : esc(S.people[1].name) + ' ainda deve a ' + esc(S.people[0].name)}</div>
+        <div class="fig" style="font-size:2.5rem">${brl(Math.abs(net))}</div>
+        <div class="sub">${open} parcela${open === 1 ? '' : 's'} em aberto${nextDue ? ` · próxima: <b>${esc(dueLabel(nextDue.dueYm))}</b>, ${brl(nextDue.cents)}` : ''}</div></div>`;
+  return `${monthHeader('A acertar')}
+  <p class="muted">Aqui ficam os combinados entre vocês, por exemplo o que um pagou pelo outro e será devolvido em parcelas. <b>Não mudam o acerto do mês</b>: você escolhe em qual mês cada parcela entra na transferência.</p>
+  ${summary}
+  <div style="margin:12px 0"><button class="primary" data-a="new-plan">Novo combinado</button></div>
+  ${groups.length ? groups.map((g) => {
+    const paid = g.filter((p) => p.paid).length, rest = g.filter((p) => !p.paid).reduce((a, p) => a + p.cents, 0), total = g.reduce((a, p) => a + p.cents, 0);
+    return `<div class="card"><div class="row"><div class="grow"><h3 style="margin:0">${esc(g[0].label)}</h3><div class="muted">${esc(S.people[g[0].debtor].name)} paga ${esc(S.people[1 - g[0].debtor].name)} · total ${brl(total)} em ${g.length}x</div></div>
+      <button type="button" class="link danger" data-a="plan-del" data-v="${g[0].planId}">excluir</button></div>
+      ${bar(paid, g.length, false)}<div class="muted" style="margin:6px 0 4px">${paid} de ${g.length} pagas · restam ${brl(rest)}</div>
+      ${g.map(planLine).join('')}
+      ${itemsBlock(g[0].planId, total)}</div>`;
+  }).join('') : '<div class="empty">Nenhum combinado ainda.<br>Toque em <b>Novo combinado</b> para parcelar o que um pagou pelo outro.</div>'}`;
+}
+function itemsBlock(planId, planTotal) {
+  const its = S.planItems.filter((i) => i.planId === planId).sort((a, b) => a.date.localeCompare(b.date));
+  const sumI = its.reduce((a, i) => a + i.cents, 0);
+  return `<details class="tbl" ${its.length ? '' : ''}><summary>Itens do combinado (${its.length}) · ${brl(sumI)}</summary>
+    ${its.map((i) => `<div class="plan-row"><div class="grow"><b>${esc(i.desc)}</b><div class="muted">${dayLabel(i.date)}</div></div><div class="amt-col"><div class="amt">${brl(i.cents)}</div><div class="plan-act"><button type="button" class="link danger" data-a="item-del" data-v="${i.id}">remover</button></div></div></div>`).join('')}
+    ${its.length && sumI !== planTotal ? `<p class="muted warn">Os itens somam ${brl(sumI)} e as parcelas somam ${brl(planTotal)}.</p>` : ''}
+    <button type="button" data-a="item-add" data-v="${planId}" style="margin-top:8px">Adicionar item</button></details>`;
+}
+function itemForm(planId) {
+  openSheet(`<h2 style="margin-top:0">Item do combinado</h2>
+  <form id="item-form"><label>O que foi pago</label><input name="desc" required maxlength="80" placeholder="Ex.: Mercado, parcela do cartão…">
+    <div class="grid2"><div><label>Valor (R$)</label><input name="val" inputmode="decimal" required placeholder="0,00"></div><div><label>Data</label><input name="date" type="date" value="${todayStr()}" required></div></div>
+    <p class="muted">É um registro do que compõe o combinado. Se o total mudar, ajuste as parcelas.</p>
+    <div class="actions"><button type="button" id="item-cancel">Cancelar</button><button class="primary" type="submit">Adicionar</button></div></form>`);
+  $('#item-cancel').onclick = closeSheet;
+  $('#item-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const f = e.target, cents = parseMoney(f.elements.val.value);
+    if (cents <= 0) { toast('Informe um valor maior que zero'); return; }
+    S.planItems.push({ id: uid(), planId, date: f.elements.date.value, desc: f.elements.desc.value.trim(), cents });
+    save(); closeSheet(); render(); toast('Item adicionado ✔');
+  });
+}
+function planForm() {
+  const me = CLOUD ? S.me : 0;
+  const s0 = settlement(ui.ym);
+  const items = [];
+  openSheet(`<h2 style="margin-top:0">Novo combinado</h2>
+  <form id="plan-form">
+    <label>Quem vai pagar</label><select name="debtor">${[0, 1].map((i) => `<option value="${i}" ${i === me ? 'selected' : ''}>${esc(S.people[i].name)}</option>`).join('')}</select>
+    <label>Descrição</label><input name="label" required maxlength="80" placeholder="Ex.: Gastos de setembro e outubro pagos pela ${esc(S.people[1 - me].name)}">
+    <label>O que foi pago (opcional)</label>
+    <div id="pi-list"></div>
+    <button type="button" class="link" id="pi-add">+ Adicionar item pago</button>
+    <label id="l-total">Valor total (R$)</label><input name="total" inputmode="decimal" required placeholder="0,00">
+    <p class="muted" id="plan-use" ${s0.debtor !== null && s0.owes > 0 ? '' : 'hidden'}>Quer usar o saldo do acerto de ${esc(monthLabel(ui.ym))}? <button type="button" class="link" id="plan-use-btn">${s0.debtor !== null ? esc(S.people[s0.debtor].name) + ' deve ' + brl(s0.owes) : ''}</button></p>
+    <div class="grid2"><div><label>Número de parcelas</label><input name="n" type="number" inputmode="numeric" min="1" max="60" value="6" required></div>
+      <div><label>Primeira parcela em</label><input name="first" type="month" value="${shiftYm(ui.ym, 1)}" required></div></div>
+    <label>Parcelas que já foram pagas</label><input name="done" type="number" inputmode="numeric" min="0" max="60" value="0">
+    <p class="muted" id="plan-help" style="min-height:2.6em"></p>
+    <div class="actions"><button type="button" id="plan-cancel">Cancelar</button><button class="primary" type="submit">Criar combinado</button></div>
+  </form>`);
+  const f = $('#plan-form');
+  const sumItems = () => items.reduce((a, i) => a + (i.cents || 0), 0);
+  const drawItems = () => {
+    $('#pi-list').innerHTML = items.map((it, k) => `<div class="pi-row"><input type="date" data-k="${k}" data-p="date" value="${esc(it.date)}"><input data-k="${k}" data-p="desc" placeholder="O que foi" value="${esc(it.desc)}" maxlength="80"><input data-k="${k}" data-p="val" inputmode="decimal" placeholder="0,00" value="${it.cents ? num(it.cents) : ''}"><button type="button" class="link danger" data-k="${k}" data-p="rm" aria-label="Remover item">×</button></div>`).join('');
+    syncTotal();
+  };
+  const syncTotal = () => {
+    const has = items.length > 0;
+    f.elements.total.readOnly = has;
+    $('#l-total').textContent = has ? 'Valor total (soma dos itens)' : 'Valor total (R$)';
+    if (has) f.elements.total.value = num(sumItems());
+    calc();
+  };
+  const calc = () => {
+    const total = parseMoney(f.elements.total.value), n = Math.max(1, Math.min(60, +f.elements.n.value || 1)), first = f.elements.first.value;
+    if (total <= 0 || !/^\d{4}-\d{2}$/.test(first)) { $('#plan-help').textContent = 'Informe o valor total e o mês da primeira parcela.'; return null; }
+    const per = Math.floor(total / n), done = Math.max(0, Math.min(n, +f.elements.done.value || 0));
+    $('#plan-help').textContent = `${n} parcela${n === 1 ? '' : 's'} de ${brl(per)}${total - per * n ? ` (a última ${brl(total - per * (n - 1))})` : ''}, de ${dueLabel(first)} a ${dueLabel(shiftYm(first, n - 1))}.${done ? ` ${done} já paga${done === 1 ? '' : 's'}.` : ''}`;
+    return { total, n, first, per, done };
+  };
+  $('#pi-add').onclick = () => { items.push({ date: todayStr(), desc: '', cents: 0 }); drawItems(); };
+  $('#pi-list').addEventListener('input', (e) => { const k = +e.target.dataset.k, p = e.target.dataset.p; if (p === 'date') items[k].date = e.target.value; else if (p === 'desc') items[k].desc = e.target.value; else if (p === 'val') { items[k].cents = parseMoney(e.target.value); syncTotal(); } });
+  $('#pi-list').addEventListener('click', (e) => { if (e.target.dataset.p === 'rm') { items.splice(+e.target.dataset.k, 1); drawItems(); } });
+  f.addEventListener('input', (e) => { if (!e.target.dataset.p) calc(); });
+  calc();
+  const use = $('#plan-use-btn');
+  if (use) use.onclick = () => { if (items.length) { toast('Remova os itens para digitar o total'); return; } f.elements.debtor.value = String(s0.debtor); f.elements.total.value = num(s0.owes); calc(); };
+  $('#plan-cancel').onclick = closeSheet;
+  f.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const c = calc();
+    const badItem = items.find((i) => !(i.cents > 0) || !i.desc.trim() || !/^\d{4}-\d{2}-\d{2}$/.test(i.date));
+    if (!c) { toast('Informe o valor total e o mês da primeira parcela'); return; }
+    if (badItem) { toast('Confira cada item: descrição, valor e data'); return; }
+    const planId = uid(), debtor = +f.elements.debtor.value, label = f.elements.label.value.trim();
+    for (let i = 0; i < c.n; i++) S.plans.push({ id: uid(), planId, label, debtor, dueYm: shiftYm(c.first, i), no: i + 1, total: c.n, cents: i === c.n - 1 ? c.total - c.per * (c.n - 1) : c.per, paid: i < c.done });
+    items.forEach((it) => S.planItems.push({ id: uid(), planId, date: it.date, desc: it.desc.trim(), cents: it.cents }));
+    save(); closeSheet(); render(); toast('Combinado criado ✔');
+  });
+}
+
 /* ----- Divisão ----- */
 function viewDivisao() {
   const s = settlement(ui.ym), [a, b] = S.people, inc = monthIncome(ui.ym);
@@ -378,6 +505,15 @@ function viewDivisao() {
     : `<div class="muted">Para ficar justo</div><div class="v">${esc(S.people[s.debtor].name)} transfere</div><div class="v bad">${brl(s.owes)}</div><div class="muted">para ${esc(S.people[1 - s.debtor].name)}</div>
        <p><button class="primary" data-a="settle">Registrar acerto feito</button></p>`;
   const sal = S.people[0].income + S.people[1].income;
+  const dueHere = S.plans.filter((p) => !p.paid && (p.incYm === ui.ym || (!p.incYm && p.dueYm === ui.ym)));
+  const included = S.plans.filter((p) => !p.paid && p.incYm === ui.ym);
+  const incSigned = included.reduce((a, p) => a + (p.debtor === 0 ? p.cents : -p.cents), 0);   // + : pessoa 0 paga a pessoa 1
+  const base0to1 = Math.round(-s.net[0]);
+  const total0to1 = (s.debtor === null ? 0 : base0to1) + incSigned;
+  const planCard = dueHere.length ? `<div class="card"><h3>Parcelas combinadas deste mês</h3><p class="muted">Não fazem parte do acerto acima. Inclua só se quiser transferir junto.</p>
+      ${dueHere.map((p) => `<div class="plan-row"><div class="grow"><b>${esc(p.label)}</b><div class="muted">${p.no}/${p.total} · ${esc(S.people[p.debtor].name)} paga ${esc(S.people[1 - p.debtor].name)}</div></div><div class="amt-col"><div class="amt">${brl(p.cents)}</div><div class="plan-act">${p.incYm === ui.ym ? `<button type="button" class="link" data-a="plan-exc" data-v="${p.id}">tirar daqui</button>` : `<button type="button" data-a="plan-inc" data-v="${p.id}">Incluir neste acerto</button>`}</div></div></div>`).join('')}
+      ${included.length ? `<hr style="border:0;border-top:1px solid var(--line);margin:12px 0"><table><tr><td>Acerto do mês</td><td>${s.debtor === null ? 'em dia' : esc(S.people[s.debtor].name) + ' → ' + esc(S.people[1 - s.debtor].name) + ' ' + brl(s.owes)}</td></tr><tr><td>Parcelas incluídas</td><td>${brl(Math.abs(incSigned))}</td></tr><tr><td><b>Total a transferir</b></td><td><b>${total0to1 === 0 ? 'nada' : total0to1 > 0 ? esc(S.people[0].name) + ' → ' + esc(S.people[1].name) + ' ' + brl(total0to1) : esc(S.people[1].name) + ' → ' + esc(S.people[0].name) + ' ' + brl(-total0to1)}</b></td></tr></table>
+        <button type="button" class="primary" data-a="plan-paid-included" style="width:100%;margin-top:10px">Marcar as parcelas incluídas como pagas</button>` : ''}</div>` : '';
   return `${monthHeader('Divisão justa')}
   <div class="card"><h3>Proporção pela renda</h3>
     <div class="bar split"><i style="width:${s.r[0] * 100}%"></i><i style="width:${s.r[1] * 100}%"></i></div>
@@ -385,6 +521,7 @@ function viewDivisao() {
     <p class="muted">${sal ? `Cada despesa dividida é repartida assim: quem ganha mais paga mais, na mesma proporção da renda (${brl0(a.income)} e ${brl0(b.income)}).` : 'Configure as rendas em Ajustes para calcular a divisão.'}</p></div>
 
   <div class="card big">${result}</div>
+  ${planCard}
 
   <div class="card"><h3>Despesas divididas do mês: ${brl(s.total)}</h3>
     <table><tr><th></th><th>${esc(a.name)}</th><th>${esc(b.name)}</th></tr>
@@ -475,7 +612,7 @@ function openSetup() {
   if ($('#setup-form')) return;
   openSheet(`<h1>Bem-vindos</h1><p class="muted">Vamos configurar o básico. Dá para mudar depois em Ajustes.</p>
     <form id="setup-form">
-      ${S.people.map((p, i) => `<div class="grid2"><div><label>Nome ${i + 1}</label><input name="n${i}" placeholder="Ex.: ${i ? 'Maria' : 'João'}" required></div>
+      ${S.people.map((p, i) => `<div class="grid2"><div><label>Nome ${i + 1}</label><input name="n${i}" placeholder="Ex.: ${i ? 'Anna' : 'Junior'}" required></div>
         <div><label>Renda mensal (R$)</label><input name="i${i}" inputmode="decimal" placeholder="0,00" required></div></div>`).join('')}
       <div class="actions"><button class="primary" type="submit">Começar</button></div></form>`);
   $('#setup-form').addEventListener('submit', (e) => {
@@ -507,8 +644,9 @@ function txForm(t) {
       <label>Tipo de gasto</label>${seg('nature', Object.entries(NATURES).map(([k, l]) => [k, l]), t.nature)}
       <label>Onde entra</label>${seg('split', [['shared', 'Casa (divide pela renda)'], ['personal', 'Pessoal (só meu)']], t.split)}
       <div id="vis-fields" ${t.split === 'personal' ? '' : 'hidden'}><label>Quem pode ver</label>${seg('vis', [['open', 'Parceiro vê'], ['private', 'Só eu']], t.vis || 'open')}</div>
+      <p class="muted" id="vis-other" hidden>Gasto da outra pessoa: aparece para os dois, e vocês dois podem corrigir.</p>
     </div>
-    <label id="l-payer">${t.kind === 'receita' ? 'Quem recebeu' : t.split === 'personal' ? 'De quem é o gasto' : 'Quem pagou'}</label><select name="payer">${payerOptions(t.payer, t.kind === 'despesa' && t.split !== 'personal', t.kind === 'despesa' && t.split === 'personal')}</select>
+    <label id="l-payer">${t.kind === 'receita' ? 'Quem recebeu' : t.split === 'personal' ? 'De quem é o gasto' : 'Quem pagou'}</label><select name="payer">${payerOptions(t.payer, t.kind === 'despesa' && t.split !== 'personal', false)}</select>
     <div class="actions">${isNew ? '' : '<button type="button" class="danger" data-a="del-tx">Excluir</button>'}<button class="primary" type="submit">Salvar</button></div>
   </form>`);
   const f = $('#tx-form');
@@ -532,7 +670,10 @@ function txForm(t) {
     }
     const sel = f.elements.payer, cur = sel.value;
     const joint = k === 'despesa' && !personalSel;
-    sel.innerHTML = payerOptions(cur === 'joint' && !joint ? (CLOUD ? S.me : 0) : cur, joint, personalSel);
+    sel.innerHTML = payerOptions(cur === 'joint' && !joint ? (CLOUD ? S.me : 0) : cur, joint, false);
+    const ownerOther = personalSel && CLOUD && +sel.value !== S.me;
+    $('#vis-fields').hidden = !personalSel || ownerOther;
+    $('#vis-other').hidden = !ownerOther;
     $('#l-payer').textContent = k === 'receita' ? 'Quem recebeu' : k === 'acerto' ? 'Quem transferiu' : personalSel ? 'De quem é o gasto' : 'Quem pagou';
   };
   f.addEventListener('change', sync);
@@ -549,7 +690,7 @@ function txForm(t) {
     if (kind === 'despesa') {
       base.cat = val(f, 'cat'); base.nature = f.querySelector('[name=nature]:checked').value;
       base.split = payer === 'joint' ? 'shared' : f.querySelector('[name=split]:checked').value;
-      base.vis = base.split === 'personal' ? f.querySelector('[name=vis]:checked').value : undefined;
+      base.vis = base.split === 'personal' ? (CLOUD && payer !== S.me ? 'open' : f.querySelector('[name=vis]:checked').value) : undefined;
       if (base.nature === 'fixa' && base.paid === undefined) base.paid = true;
       base.method = f.querySelector('[name=method]:checked').value;
       base.instNo = undefined; base.instTotal = undefined;
@@ -565,9 +706,9 @@ function txForm(t) {
         const group = uid();
         for (let i = 0; i <= base.instTotal - base.instNo; i++) {
           const no = base.instNo + i;
-          S.tx.push({ ...base, id: uid(), group, instNo: no, date: addMonthsToDate(base.date, i), desc: `${base.desc} (${no}/${base.instTotal})`, paid: true });
+          S.tx.push({ ...base, id: uid(), createdBy: CLOUD ? cloudUid : undefined, group, instNo: no, date: addMonthsToDate(base.date, i), desc: `${base.desc} (${no}/${base.instTotal})`, paid: true });
         }
-      } else S.tx.push({ ...base, id: uid() });
+      } else S.tx.push({ ...base, id: uid(), createdBy: CLOUD ? cloudUid : undefined });
     } else {
       S.tx = S.tx.map((x) => (x.id === t.id ? base : x));
     }
@@ -673,6 +814,15 @@ const actions = {
     editing = null;
     txForm({ kind: 'acerto', desc: 'Acerto de contas', cents: s.owes, date: d.startsWith(ui.ym) ? d : `${ui.ym}-${pad(daysIn(ui.ym))}`, payer: s.debtor });
   },
+  'new-plan': planForm,
+  'plan-paid': (v) => { const p = S.plans.find((x) => x.id === v); if (p) { p.paid = true; p.paidOn = todayStr(); p.incYm = undefined; save(); render(); toast('Parcela marcada como paga ✔'); } },
+  'plan-unpaid': (v) => { const p = S.plans.find((x) => x.id === v); if (p) { p.paid = false; p.paidOn = undefined; save(); render(); } },
+  'plan-inc': (v) => { const p = S.plans.find((x) => x.id === v); if (p) { p.incYm = ui.ym; save(); render(); toast(`Parcela incluída no acerto de ${monthLabel(ui.ym)}`); } },
+  'plan-exc': (v) => { const p = S.plans.find((x) => x.id === v); if (p) { p.incYm = undefined; save(); render(); } },
+  'plan-paid-included': () => { S.plans.filter((p) => !p.paid && p.incYm === ui.ym).forEach((p) => { p.paid = true; p.paidOn = todayStr(); p.incYm = undefined; }); save(); render(); toast('Parcelas marcadas como pagas ✔'); },
+  'plan-del': (v) => { if (!confirm('Excluir este combinado, as parcelas e os itens dele?')) return; S.plans = S.plans.filter((p) => p.planId !== v); S.planItems = S.planItems.filter((i) => i.planId !== v); save(); render(); toast('Combinado excluído'); },
+  'item-add': (v) => itemForm(v),
+  'item-del': (v) => { S.planItems = S.planItems.filter((i) => i.id !== v); save(); render(); },
   'change-pass': () => gateNewPassword(false),
   'check-update': async () => {
     if (!swReg) { toast('Atualização automática indisponível neste navegador'); return; }
@@ -773,13 +923,17 @@ let pushTimer = null, chain = Promise.resolve(), channel = null;
 const isNetErr = (e) => /fetch|network|offline|timeout/i.test(String((e && e.message) || e)) || !navigator.onLine;
 
 const rowTx = (t) => ({ id: t.id, household_id: hid, kind: t.kind, date: t.date, descr: t.desc, cents: t.cents, cat: t.cat ?? null, nature: t.nature ?? null, payer: String(t.payer), split: t.split ?? null, vis: t.vis ?? null, paid: !!t.paid, tpl_id: t.tplId ?? null, grp: t.group ?? null, method: t.method ?? null, inst_no: t.instNo ?? null, inst_total: t.instTotal ?? null });
-const fromTx = (r) => ({ id: r.id, kind: r.kind, date: r.date, desc: r.descr, cents: Number(r.cents), cat: r.cat ?? undefined, nature: r.nature ?? undefined, payer: r.payer === 'joint' ? 'joint' : +r.payer, split: r.split ?? undefined, vis: r.vis ?? undefined, paid: r.paid, tplId: r.tpl_id ?? undefined, group: r.grp ?? undefined, method: r.method ?? undefined, instNo: r.inst_no ?? undefined, instTotal: r.inst_total ?? undefined });
+const fromTx = (r) => ({ id: r.id, kind: r.kind, date: r.date, desc: r.descr, cents: Number(r.cents), cat: r.cat ?? undefined, nature: r.nature ?? undefined, payer: r.payer === 'joint' ? 'joint' : +r.payer, split: r.split ?? undefined, vis: r.vis ?? undefined, paid: r.paid, tplId: r.tpl_id ?? undefined, group: r.grp ?? undefined, method: r.method ?? undefined, instNo: r.inst_no ?? undefined, instTotal: r.inst_total ?? undefined, createdBy: r.created_by ?? undefined });
 const rowTpl = (t) => ({ id: t.id, household_id: hid, descr: t.desc, cents: t.cents, day: t.day, cat: t.cat, payer: String(t.payer), split: t.split, vis: t.vis ?? null, active: !!t.active, start_ym: t.start });
 const fromTpl = (r) => ({ id: r.id, desc: r.descr, cents: Number(r.cents), day: r.day, cat: r.cat, payer: r.payer === 'joint' ? 'joint' : +r.payer, split: r.split, vis: r.vis ?? undefined, active: r.active, start: r.start_ym });
 const rowCat = (c) => ({ household_id: hid, id: c.id, name: c.name, emoji: c.emoji, essential: !!c.essential, budget_cents: c.budget || 0 });
 const fromCat = (r) => ({ id: r.id, name: r.name, emoji: r.emoji, essential: r.essential, budget: Number(r.budget_cents) });
+const rowPlan = (p) => ({ id: p.id, household_id: hid, plan_id: p.planId, label: p.label, debtor: p.debtor, due_ym: p.dueYm, no: p.no, total: p.total, cents: p.cents, paid: !!p.paid, paid_on: p.paidOn ?? null, inc_ym: p.incYm || null });
+const fromPlan = (r) => ({ id: r.id, planId: r.plan_id, label: r.label, debtor: r.debtor, dueYm: r.due_ym, no: r.no, total: r.total, cents: Number(r.cents), paid: r.paid, paidOn: r.paid_on ?? undefined, incYm: r.inc_ym ?? undefined });
+const rowItem = (i) => ({ id: i.id, household_id: hid, plan_id: i.planId, date: i.date, descr: i.desc, cents: i.cents });
+const fromItem = (r) => ({ id: r.id, planId: r.plan_id, date: r.date, desc: r.descr, cents: Number(r.cents) });
 const rowMe = (p) => ({ name: p.name, income_cents: p.income });
-const TABLES = [['tx', () => S.tx, rowTx, 'id'], ['tpl', () => S.tpl, rowTpl, 'id'], ['cats', () => S.cats, rowCat, 'household_id,id']];
+const TABLES = [['tx', () => S.tx, rowTx, 'id'], ['tpl', () => S.tpl, rowTpl, 'id'], ['cats', () => S.cats, rowCat, 'household_id,id'], ['settle_plan', () => S.plans, rowPlan, 'id'], ['settle_item', () => S.planItems, rowItem, 'id']];
 
 function snapshotAll() {
   TABLES.forEach(([name, get, mk]) => { snap[name] = {}; get().forEach((it) => { snap[name][it.id] = JSON.stringify(mk(it)); }); });
@@ -801,7 +955,7 @@ async function pushAll() {
   if (!hid) return;
   for (const [name, get, mk, conflict] of TABLES) {
     const cur = {}; get().forEach((it) => { cur[it.id] = mk(it); });
-    const old = snap[name], fresh = [], changed = [], gone = [];
+    const old = snap[name] || (snap[name] = {}), fresh = [], changed = [], gone = [];
     for (const id in cur) { const j = JSON.stringify(cur[id]); if (!(id in old)) fresh.push(cur[id]); else if (old[id] !== j) changed.push(cur[id]); }
     for (const id in old) if (!(id in cur)) gone.push(id);
     for (const c of chunks(fresh)) must(await sb.from(name).upsert(c, { onConflict: conflict, ignoreDuplicates: true }));
@@ -849,13 +1003,13 @@ async function pull() {
   const members = await fetchAll('members', 'idx');
   const mine = members.find((m) => m.user_id === cloudUid);
   if (!h || !mine) return false;
-  const [cats, tx, tpl] = await Promise.all([fetchAll('cats', 'id'), fetchAll('tx', 'date'), fetchAll('tpl', 'id')]);
+  const [cats, tx, tpl, plans, items] = await Promise.all([fetchAll('cats', 'id'), fetchAll('tx', 'date'), fetchAll('tpl', 'id'), fetchAll('settle_plan', 'due_ym'), fetchAll('settle_item', 'date')]);
   hid = h.id;
   S = {
     ...defaultState(), setup: true, me: mine.idx, invite: h.invite_code, savingsPct: h.savings_pct,
     people: [0, 1].map((i) => { const m = members.find((x) => x.idx === i); return m ? { name: m.name, income: Number(m.income_cents) } : { name: 'Aguardando…', income: 0, pending: true }; }),
     cats: cats.length ? cats.map(fromCat) : DEFAULT_CATS.map((c) => ({ ...c, budget: 0 })),
-    tx: tx.map(fromTx), tpl: tpl.map(fromTpl),
+    tx: tx.map(fromTx), tpl: tpl.map(fromTpl), plans: plans.map(fromPlan), planItems: items.map(fromItem),
   };
   snapshotAll();
   if (!cats.length) { snap.cats = {}; }
@@ -913,12 +1067,12 @@ function gateAuth(mode = 'login', msg = '') {
 function gateHousehold(msg = '') {
   showGate(`<h1>Quase lá</h1><p class="muted">Conectado como ${esc(cloudEmail)}.</p>
     <form id="hh-new" class="card"><h3>1ª pessoa: criar a casa</h3>
-      <label>Seu nome</label><input name="name" required placeholder="Ex.: João">
+      <label>Seu nome</label><input name="name" required placeholder="Ex.: Junior">
       <label>Sua renda mensal (R$)</label><input name="income" inputmode="decimal" required placeholder="0,00">
       <div class="actions"><button class="primary" type="submit">Criar a casa</button></div></form>
     <form id="hh-join" class="card"><h3>2ª pessoa: entrar com o código</h3>
       <label>Código recebido</label><input name="code" required placeholder="Ex.: 3F9A1C27" autocapitalize="characters">
-      <label>Seu nome</label><input name="name" required placeholder="Ex.: Ana">
+      <label>Seu nome</label><input name="name" required placeholder="Ex.: Anna">
       <label>Sua renda mensal (R$)</label><input name="income" inputmode="decimal" required placeholder="0,00">
       <div class="actions"><button class="primary" type="submit">Entrar na casa</button></div></form>
     <p class="muted" id="hh-msg">${esc(msg)}</p><button class="link" id="hh-out" type="button">Sair da conta</button>`);
@@ -985,7 +1139,7 @@ async function boot() {
 boot();
 
 /* ---------- atualização do app ---------- */
-const APP_VERSION = 'v9';
+const APP_VERSION = 'v10';
 let swReg = null, updateWorker = null, userUpdating = false;
 function showUpdateBar(worker) {
   updateWorker = worker;

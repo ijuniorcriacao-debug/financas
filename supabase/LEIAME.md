@@ -57,3 +57,10 @@ dos gastos "só meu" garantida **no servidor**.
   Falta agendar a limpeza das cópias com mais de 35 dias (precisa de um `delete`, que o conector só executa com aprovação do
   dono na hora). Sem a limpeza as cópias só acumulam (poucos KB por dia), o que é aceitável por bastante tempo.
   Para restaurar: ler `select data from public.backups order by taken_at desc limit 1` e reinserir as linhas.
+
+## Combinados em parcelas (aba "A acertar") e gasto pessoal do outro
+- `settle_plan` (parcelas: quem paga, mês, valor, paga ou não, mês em que entra no acerto) e `settle_item` (o que compõe o combinado).
+  O acerto do mês **não muda**: a parcela só soma na transferência de um mês se a pessoa escolher "incluir neste acerto".
+- Na importação da fatura cada linha tem destino (Casa, só de uma pessoa ou só da outra). Gasto pessoal lançado para a outra
+  pessoa fica sempre visível para os dois e pode ser corrigido por quem lançou (`tx.created_by`) e pelo dono.
+- Colunas `tx.paid_by`, `tx.hold`, `tx.settle_ym` e `settle_plan.inc` ficaram sem uso (reservadas).

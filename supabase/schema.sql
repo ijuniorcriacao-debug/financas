@@ -255,3 +255,34 @@ create extension if not exists pg_cron;
 select cron.schedule('backup-diario', '0 6 * * *', 'insert into public.backups (household_id, counts, data) select h.id, jsonb_build_object(''tx'', (select count(*) from public.tx x where x.household_id = h.id), ''tpl'', (select count(*) from public.tpl t where t.household_id = h.id), ''cats'', (select count(*) from public.cats c where c.household_id = h.id)), jsonb_build_object(''household'', to_jsonb(h), ''members'', coalesce((select jsonb_agg(to_jsonb(m)) from public.members m where m.household_id = h.id), ''[]''::jsonb), ''cats'', coalesce((select jsonb_agg(to_jsonb(c)) from public.cats c where c.household_id = h.id), ''[]''::jsonb), ''tpl'', coalesce((select jsonb_agg(to_jsonb(t)) from public.tpl t where t.household_id = h.id), ''[]''::jsonb), ''tx'', coalesce((select jsonb_agg(to_jsonb(x)) from public.tx x where x.household_id = h.id), ''[]''::jsonb)) from public.households h');
 -- Limpeza opcional das cópias com mais de 35 dias (ainda NÃO agendada; roda à mão ou vira um segundo job):
 --   delete from public.backups where taken_at < now() - interval '35 days';
+
+-- ------------------------- gasto pessoal lançado por outra pessoa (ex.: compra dela no cartão do outro)
+alter table public.tx add column if not exists created_by uuid default auth.uid();
+-- Quem lança gasto pessoal de OUTRA pessoa precisa deixá-lo visível (vis = 'open'); depois, o dono e quem criou podem corrigir.
+alter policy tx_insert on public.tx with check (household_id = public.my_household() and (kind <> 'despesa' or coalesce(split, '') <> 'personal' or payer = public.my_idx() or coalesce(vis, 'open') = 'open'));
+alter policy tx_update on public.tx using (household_id = public.my_household() and (kind <> 'despesa' or coalesce(split, '') <> 'personal' or payer = public.my_idx() or created_by = auth.uid())) with check (household_id = public.my_household() and (kind <> 'despesa' or coalesce(split, '') <> 'personal' or payer = public.my_idx() or created_by = auth.uid() or coalesce(vis, 'open') = 'open'));
+alter policy tx_delete on public.tx using (household_id = public.my_household() and (kind <> 'despesa' or coalesce(split, '') <> 'personal' or payer = public.my_idx() or created_by = auth.uid()));
+-- (reservadas, sem uso no app: tx.paid_by, tx.hold, tx.settle_ym)
+alter table public.tx add column if not exists paid_by text;
+alter table public.tx add column if not exists hold boolean not null default false;
+alter table public.tx add column if not exists settle_ym text;
+
+-- ------------------------------------------ combinados em parcelas (aba "A acertar"; não mexem no acerto do mês)
+create table if not exists public.settle_plan (
+  id text primary key, household_id uuid not null references public.households(id) on delete cascade,
+  plan_id text not null, label text not null, debtor smallint not null check (debtor in (0, 1)),
+  due_ym text not null check (due_ym ~ '^[0-9]{4}-[0-9]{2}$'), no smallint not null check (no >= 1),
+  total smallint not null check (total >= 1 and total <= 120), cents bigint not null check (cents > 0),
+  paid boolean not null default false, paid_on date, inc boolean not null default false, inc_ym text
+);
+create table if not exists public.settle_item (
+  id text primary key, household_id uuid not null references public.households(id) on delete cascade,
+  plan_id text not null, date date not null, descr text not null, cents bigint not null check (cents > 0)
+);
+alter table public.settle_plan enable row level security;
+alter table public.settle_item enable row level security;
+revoke all on public.settle_plan, public.settle_item from anon, authenticated;
+grant select, insert, update, delete on public.settle_plan, public.settle_item to authenticated;
+create policy settle_plan_all on public.settle_plan for all to authenticated using (household_id = public.my_household()) with check (household_id = public.my_household());
+create policy settle_item_all on public.settle_item for all to authenticated using (household_id = public.my_household()) with check (household_id = public.my_household());
+alter publication supabase_realtime add table public.settle_plan, public.settle_item;

@@ -208,54 +208,56 @@ function openImportEmpty(notes) {
 
 function openImport(items, notes, defaultMethod = 'conta') {
   const own = ui.who !== 'casa';
-  const st = { items: items.map((it) => ({ ...it, on: !it.dup })), split: own ? 'personal' : 'shared', vis: 'open', nature: 'variavel', method: defaultMethod, payer: own ? String(ui.who) : (CLOUD ? String(S.me) : '0') };
+  const selfIdx = CLOUD ? S.me : (own ? ui.who : 0);
+  const defDest = own ? String(ui.who) : 'casa';
+  const st = { items: items.map((it) => ({ ...it, on: !it.dup, dest: defDest })), vis: 'open', nature: 'variavel', method: defaultMethod, payer: own ? String(ui.who) : String(selfIdx) };
+  const destOptions = (sel) => `<option value="casa" ${sel === 'casa' ? 'selected' : ''}>Casa (divide pela renda)</option>${[0, 1].map((i) => `<option value="${i}" ${sel === String(i) ? 'selected' : ''}>Só de ${esc(S.people[i].name)}</option>`).join('')}`;
   const rowHtml = (it, i) => `<div class="imp-row ${it.dup ? 'dup' : ''}"><label class="imp-on"><input type="checkbox" data-f="on" data-i="${i}" ${it.on ? 'checked' : ''}></label>
     <div class="grow"><input data-f="desc" data-i="${i}" value="${esc(it.desc)}" maxlength="80">
       <div class="imp-line"><input type="date" data-f="date" data-i="${i}" value="${esc(it.date)}"><input data-f="val" data-i="${i}" inputmode="decimal" value="${num(it.cents)}"><select data-f="cat" data-i="${i}">${catOptions(it.cat)}</select></div>
+      <select class="imp-dest" data-f="dest" data-i="${i}" aria-label="Destino do gasto">${destOptions(it.dest)}</select>
       ${it.dup ? '<div class="muted warn">Já existe um gasto igual nesse dia — desmarquei para não duplicar.</div>' : ''}</div></div>`;
   openSheet(`<h2 style="margin-top:0">Conferir antes de lançar</h2>
     ${notes.map((n) => `<p class="muted">${esc(n)}</p>`).join('')}
     <div class="imp-opts">
-      <label>Onde entram</label>${seg('imp-split', [['shared', 'Casa'], ['personal', 'Pessoal']], st.split)}
-      <div id="imp-vis" ${st.split === 'personal' ? '' : 'hidden'}><label>Quem pode ver</label>${seg('imp-vis', [['open', 'Parceiro vê'], ['private', 'Só eu']], st.vis)}</div>
-      <div class="grid2"><div><label id="imp-l-payer">Quem pagou</label><select id="imp-payer"></select></div>
-        <div><label>Como foi pago</label><select id="imp-method">${Object.entries(METHODS).map(([k, l]) => `<option value="${k}" ${k === st.method ? 'selected' : ''}>${l}</option>`).join('')}</select></div></div>
-      <div class="grid2"><div><label>Tipo de gasto</label><select id="imp-nature">${Object.entries(NATURES).map(([k, l]) => `<option value="${k}" ${k === st.nature ? 'selected' : ''}>${l}</option>`).join('')}</select></div></div>
+      <div class="grid2"><div><label>Destino de todas</label><select id="imp-dest-all">${destOptions(defDest)}</select></div>
+        <div><label>Quem pagou (dono do cartão)</label><select id="imp-payer">${payerOptions(st.payer, true, false)}</select></div></div>
+      <p class="muted">Compra do outro no seu cartão? Troque o destino só dessa linha para "Só de …". Ela vai para a tela pessoal de quem usou.</p>
+      <div id="imp-vis" hidden><label>Seus gastos pessoais: quem pode ver</label>${seg('imp-vis', [['open', 'Parceiro vê'], ['private', 'Só eu']], st.vis)}</div>
+      <div class="grid2"><div><label>Como foi pago</label><select id="imp-method">${Object.entries(METHODS).map(([k, l]) => `<option value="${k}" ${k === st.method ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+        <div><label>Tipo de gasto</label><select id="imp-nature">${Object.entries(NATURES).map(([k, l]) => `<option value="${k}" ${k === st.nature ? 'selected' : ''}>${l}</option>`).join('')}</select></div></div>
     </div>
     <div class="row" style="margin-top:12px"><b id="imp-count"></b><button class="link" id="imp-all" type="button">marcar/desmarcar todos</button></div>
     <div id="imp-list">${st.items.map(rowHtml).join('')}</div>
     <div class="actions"><button type="button" id="imp-cancel">Cancelar</button><button class="primary" type="button" id="imp-go">Lançar</button></div>`);
 
-  const refreshPayer = () => {
-    const personal = st.split === 'personal';
-    if (personal && CLOUD) st.payer = String(S.me);
-    if (personal && st.payer === 'joint') st.payer = '0';
-    $('#imp-payer').innerHTML = payerOptions(st.payer, !personal, personal);
-    $('#imp-l-payer').textContent = personal ? 'De quem é o gasto' : 'Quem pagou';
-    $('#imp-vis').hidden = !personal;
-  };
+  const refreshVis = () => { $('#imp-vis').hidden = !st.items.some((x) => x.dest === String(selfIdx)); };
   const refreshCount = () => {
     const sel = st.items.filter((x) => x.on);
-    $('#imp-count').textContent = `${sel.length} de ${st.items.length} selecionados · ${brl(sel.reduce((a, x) => a + (x.cents || 0), 0))}`;
+    const other = sel.filter((x) => x.dest !== 'casa' && x.dest !== String(selfIdx)).length;
+    $('#imp-count').textContent = `${sel.length} de ${st.items.length} selecionados · ${brl(sel.reduce((a, x) => a + (x.cents || 0), 0))}${other ? ` · ${other} para a tela do outro` : ''}`;
     $('#imp-go').textContent = sel.length ? `Lançar ${sel.length}` : 'Nada selecionado';
     $('#imp-go').disabled = !sel.length;
   };
-  refreshPayer(); refreshCount();
+  refreshVis(); refreshCount();
   const sheet = $('.sheet');
   sheet.addEventListener('change', (e) => {
     const el = e.target;
-    if (el.name === 'imp-split') { st.split = el.value; refreshPayer(); }
-    else if (el.name === 'imp-vis') st.vis = el.value;
+    if (el.name === 'imp-vis') st.vis = el.value;
     else if (el.id === 'imp-payer') st.payer = el.value;
     else if (el.id === 'imp-nature') st.nature = el.value;
     else if (el.id === 'imp-method') st.method = el.value;
-    else if (el.dataset.f) {
+    else if (el.id === 'imp-dest-all') {
+      st.items.forEach((x, i) => { x.dest = el.value; sheet.querySelector(`[data-f=dest][data-i="${i}"]`).value = el.value; });
+      refreshVis(); refreshCount();
+    } else if (el.dataset.f) {
       const it = st.items[+el.dataset.i], f = el.dataset.f;
       if (f === 'on') it.on = el.checked;
       else if (f === 'desc') it.desc = el.value;
       else if (f === 'date') it.date = el.value;
       else if (f === 'val') { it.cents = parseMoney(el.value); el.value = num(it.cents); }
       else if (f === 'cat') it.cat = el.value;
+      else if (f === 'dest') { it.dest = el.value; refreshVis(); }
       refreshCount();
     }
   });
@@ -265,10 +267,15 @@ function openImport(items, notes, defaultMethod = 'conta') {
     const sel = st.items.filter((x) => x.on);
     const bad = sel.find((x) => !(x.cents > 0) || !/^\d{4}-\d{2}-\d{2}$/.test(x.date) || !x.desc.trim());
     if (bad) { toast('Confira data, descrição e valor de cada linha marcada'); return; }
-    const payer = st.split === 'personal' ? (CLOUD ? S.me : +st.payer) : (st.payer === 'joint' ? 'joint' : +st.payer);
     const rules = readRules();
     sel.forEach((x) => {
-      S.tx.push({ id: uid(), kind: 'despesa', date: x.date, desc: x.desc.trim().slice(0, 80), cents: x.cents, cat: x.cat, nature: st.nature, method: st.method, instNo: st.method === 'cartao' ? x.instNo : undefined, instTotal: st.method === 'cartao' ? x.instTotal : undefined, payer, split: st.split, vis: st.split === 'personal' ? st.vis : undefined, paid: true });
+      const base = { id: uid(), createdBy: CLOUD ? cloudUid : undefined, kind: 'despesa', date: x.date, desc: x.desc.trim().slice(0, 80), cents: x.cents, cat: x.cat, nature: st.nature, method: st.method, instNo: st.method === 'cartao' ? x.instNo : undefined, instTotal: st.method === 'cartao' ? x.instTotal : undefined, paid: true };
+      if (x.dest === 'casa') S.tx.push({ ...base, split: 'shared', payer: st.payer === 'joint' ? 'joint' : +st.payer });
+      else {
+        const owner = +x.dest;
+        // gasto pessoal de OUTRA pessoa precisa ficar visível para ela (e para quem lançou)
+        S.tx.push({ ...base, split: 'personal', payer: owner, vis: !CLOUD || owner === selfIdx ? st.vis : 'open' });
+      }
       rules[normKey(x.desc)] = x.cat;
     });
     saveRules(rules);
