@@ -411,6 +411,7 @@ function viewPend() {
       <button type="button" class="link danger" data-a="plan-del" data-v="${g[0].planId}">excluir</button></div>
       ${bar(paid, g.length, false)}<div class="muted" style="margin:6px 0 4px">${paid} de ${g.length} pagas · restam ${brl(rest)}</div>
       ${g.map(planLine).join('')}
+      <button type="button" class="primary" data-a="item-add" data-v="${g[0].planId}" style="margin:10px 0 4px;width:100%">+ Lançar mais neste combinado</button>
       ${itemsBlock(g[0].planId, total)}</div>`;
   }).join('') : '<div class="empty">Nenhum combinado ainda.<br>Toque em <b>Novo combinado</b> para parcelar o que um pagou pelo outro.</div>'}`;
 }
@@ -427,11 +428,22 @@ function itemsBlock(planId, planTotal) {
     ${its.length && sumI !== planTotal ? `<p class="muted warn">Os itens somam ${brl(sumI)} e as parcelas somam ${brl(planTotal)}.</p>${S.plans.some((p) => p.planId === planId && !p.paid) ? `<button type="button" data-a="plan-resync" data-v="${planId}">Ajustar as parcelas em aberto ao total dos itens</button>` : ''}` : ''}
     <button type="button" data-a="item-add" data-v="${planId}" style="margin-top:8px">Adicionar item</button></details>`;
 }
+function resyncPlan(planId) {
+  const ps = S.plans.filter((p) => p.planId === planId);
+  const itemsSum = S.planItems.filter((i) => i.planId === planId).reduce((a, i) => a + i.cents, 0);
+  const open = ps.filter((p) => !p.paid).sort((a, b) => a.dueYm.localeCompare(b.dueYm)), paidSum = ps.filter((p) => p.paid).reduce((a, p) => a + p.cents, 0), rest = itemsSum - paidSum;
+  if (!open.length) { toast('Todas as parcelas já foram pagas'); return false; }
+  if (rest <= 0) { toast('Os itens somam menos do que já foi pago'); return false; }
+  const per = Math.floor(rest / open.length);
+  open.forEach((p, k) => { p.cents = k === open.length - 1 ? rest - per * (open.length - 1) : per; });
+  return true;
+}
 function itemForm(planId) {
   openSheet(`<h2 style="margin-top:0">Item do combinado</h2>
   <form id="item-form"><label>O que foi pago</label><input name="desc" required maxlength="80" placeholder="Ex.: Mercado, parcela do cartão…">
     <div class="grid2"><div><label>Valor (R$)</label><input name="val" inputmode="decimal" required placeholder="0,00"></div><div><label>Data</label><input name="date" type="date" value="${todayStr()}" required></div></div>
-    <p class="muted">É um registro do que compõe o combinado. Se o total mudar, ajuste as parcelas.</p>
+    ${S.plans.some((p) => p.planId === planId && !p.paid) ? '<label class="chk" style="display:flex;gap:8px;align-items:center;margin:10px 0"><input type="checkbox" name="resync" checked style="width:auto"> Somar ao valor das parcelas em aberto</label>' : ''}
+    <p class="muted">Registra mais uma coisa dentro deste combinado. Marcado, o valor é dividido nas parcelas que ainda faltam; desmarcado, só fica registrado.</p>
     <div class="actions"><button type="button" id="item-cancel">Cancelar</button><button class="primary" type="submit">Adicionar</button></div></form>`);
   $('#item-cancel').onclick = closeSheet;
   $('#item-form').addEventListener('submit', (e) => {
@@ -439,6 +451,7 @@ function itemForm(planId) {
     const f = e.target, cents = parseMoney(f.elements.val.value);
     if (cents <= 0) { toast('Informe um valor maior que zero'); return; }
     S.planItems.push({ id: uid(), planId, date: f.elements.date.value, desc: f.elements.desc.value.trim(), cents });
+    if (f.elements.resync && f.elements.resync.checked) resyncPlan(planId);
     save(); closeSheet(); render(); toast('Item adicionado ✔');
   });
 }
@@ -827,16 +840,7 @@ const actions = {
   'plan-paid-included': () => { S.plans.filter((p) => !p.paid && p.incYm === ui.ym).forEach((p) => { p.paid = true; p.paidOn = todayStr(); p.incYm = undefined; }); save(); render(); toast('Parcelas marcadas como pagas ✔'); },
   'plan-del': (v) => { if (!confirm('Excluir este combinado, as parcelas e os itens dele?')) return; S.plans = S.plans.filter((p) => p.planId !== v); S.planItems = S.planItems.filter((i) => i.planId !== v); save(); render(); toast('Combinado excluído'); },
   'item-add': (v) => itemForm(v),
-  'plan-resync': (v) => {
-    const ps = S.plans.filter((p) => p.planId === v).sort((a, b) => a.dueYm.localeCompare(b.dueYm));
-    const itemsSum = S.planItems.filter((i) => i.planId === v).reduce((a, i) => a + i.cents, 0);
-    const open = ps.filter((p) => !p.paid), paidSum = ps.filter((p) => p.paid).reduce((a, p) => a + p.cents, 0), rest = itemsSum - paidSum;
-    if (!open.length) { toast('Todas as parcelas já foram pagas'); return; }
-    if (rest <= 0) { toast('Os itens somam menos do que já foi pago'); return; }
-    const per = Math.floor(rest / open.length);
-    open.forEach((p, k) => { p.cents = k === open.length - 1 ? rest - per * (open.length - 1) : per; });
-    save(); render(); toast('Parcelas ajustadas ✔');
-  },
+  'plan-resync': (v) => { if (resyncPlan(v)) { save(); render(); toast('Parcelas ajustadas ✔'); } },
   'item-del': (v) => { S.planItems = S.planItems.filter((i) => i.id !== v); save(); render(); },
   'change-pass': () => gateNewPassword(false),
   'check-update': async () => {
@@ -1154,7 +1158,7 @@ async function boot() {
 boot();
 
 /* ---------- atualização do app ---------- */
-const APP_VERSION = 'v11';
+const APP_VERSION = 'v12';
 let swReg = null, updateWorker = null, userUpdating = false;
 function showUpdateBar(worker) {
   updateWorker = worker;
