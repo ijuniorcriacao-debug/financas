@@ -254,3 +254,6 @@ body.gate nav#tabs, body.gate #fab { display: none; }
 .importline { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; padding: 12px 14px; margin: 4px 0 6px; border: 1px dashed var(--muted); border-radius: var(--r-l); background: transparent; }
 .importline .ic { width: 36px; height: 36px; border-radius: 10px; background: var(--brand-soft); color: var(--brand); display: grid; place-items: center; flex: none; }
 .importline .ic svg { width: 20px; height: 20px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+
+#update-bar { position: fixed; left: 0; right: 0; top: 0; z-index: 60; display: flex; align-items: center; justify-content: center; gap: 12px; padding: calc(10px + env(safe-area-inset-top, 0px)) 16px 10px; background: var(--brand); color: var(--brand-ink); font-weight: 600; font-size: .9375rem; }
+#update-bar button { background: var(--brand-ink); color: var(--brand); border: 0; padding: 7px 14px; font-weight: 700; }

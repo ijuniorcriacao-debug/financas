@@ -452,6 +452,7 @@ function viewAjustes() {
     ${S.cats.map((c) => `<div class="row" style="padding:6px 0"><span>${c.emoji} ${esc(c.name)}</span><label style="margin:0;font-size:.8rem"><input type="checkbox" data-c="essential" data-v="${c.id}" ${c.essential ? 'checked' : ''}> essencial</label></div>`).join('')}
     <p class="muted">Categorias que não são essenciais aparecem como "flexíveis" — é onde o app sugere apertar.</p></div>
 
+  ${versionCard()}
   ${CLOUD ? accountCard() : `  <div class="card"><h3>Backup e sincronização</h3>
     <p class="muted">Os dados ficam só neste aparelho. Para usar nos dois celulares: exporte aqui e importe no outro (ou mande o arquivo pelo WhatsApp). Faça isso depois de lançar gastos novos.</p>
     <div class="grid2"><button data-a="export">Exportar backup</button><button data-a="import">Importar backup</button></div>
@@ -673,6 +674,17 @@ const actions = {
     txForm({ kind: 'acerto', desc: 'Acerto de contas', cents: s.owes, date: d.startsWith(ui.ym) ? d : `${ui.ym}-${pad(daysIn(ui.ym))}`, payer: s.debtor });
   },
   'change-pass': () => gateNewPassword(false),
+  'check-update': async () => {
+    if (!swReg) { toast('Atualização automática indisponível neste navegador'); return; }
+    toast('Verificando…');
+    try { await swReg.update(); } catch (e) { toast('Sem conexão para verificar'); return; }
+    setTimeout(() => { if (!$('#update-bar')) toast('Você já está na versão mais recente ✔'); }, 1500);
+  },
+  'force-update': async () => {
+    try { const keys = await caches.keys(); await Promise.all(keys.map((k) => caches.delete(k))); } catch (e) { /* sem cache */ }
+    try { const regs = await navigator.serviceWorker.getRegistrations(); await Promise.all(regs.map((r) => r.unregister())); } catch (e) { /* sem sw */ }
+    location.reload();
+  },
   logout: async () => {
     try { await sb.auth.signOut(); } catch (e) { /* segue */ }
     location.reload();
@@ -971,4 +983,33 @@ async function boot() {
 }
 
 boot();
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+
+/* ---------- atualização do app ---------- */
+const APP_VERSION = 'v9';
+let swReg = null, updateWorker = null, userUpdating = false;
+function showUpdateBar(worker) {
+  updateWorker = worker;
+  if ($('#update-bar')) return;
+  const bar = document.createElement('div');
+  bar.id = 'update-bar';
+  bar.innerHTML = '<span>Nova versão disponível</span><button type="button" id="update-go">Atualizar</button>';
+  document.body.appendChild(bar);
+  $('#update-go').onclick = () => { userUpdating = true; $('#update-go').textContent = 'Atualizando…'; updateWorker.postMessage({ type: 'SKIP_WAITING' }); };
+}
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then((reg) => {
+    swReg = reg;
+    if (reg.waiting && navigator.serviceWorker.controller) showUpdateBar(reg.waiting);
+    reg.addEventListener('updatefound', () => {
+      const w = reg.installing;
+      if (w) w.addEventListener('statechange', () => { if (w.state === 'installed' && navigator.serviceWorker.controller) showUpdateBar(w); });
+    });
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) reg.update().catch(() => {}); });
+    setInterval(() => reg.update().catch(() => {}), 30 * 60 * 1000);
+  }).catch(() => {});
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (userUpdating) location.reload(); });
+}
+function versionCard() {
+  return `<div class="card"><h3>Atualizações</h3><p class="muted">Versão do app: <b>${APP_VERSION}</b>. Quando houver versão nova, aparece um aviso no topo com o botão "Atualizar".</p>
+    <div class="grid2"><button data-a="check-update">Verificar agora</button><button data-a="force-update">Recarregar do zero</button></div></div>`;
+}

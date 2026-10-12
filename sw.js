@@ -1,9 +1,13 @@
-const CACHE = 'financas-v8';
+const CACHE = 'financas-v9';
 const ASSETS = ['./', './index.html', './style.css', './app.js', './import.js', './config.js', './manifest.json', './icon.svg'];
 
+// A versão nova espera o usuário tocar em "Atualizar" no app (mensagem SKIP_WAITING); assim ninguém perde o que está digitando.
 self.addEventListener('install', (e) => {
-  self.skipWaiting();
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)));
+  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS.map((u) => new Request(u, { cache: 'reload' })))));
+});
+
+self.addEventListener('message', (e) => {
+  if (e.data && e.data.type === 'SKIP_WAITING') self.skipWaiting();
 });
 
 self.addEventListener('activate', (e) => {
@@ -14,11 +18,12 @@ self.addEventListener('activate', (e) => {
   );
 });
 
-// Rede primeiro (pega atualizações), cache como reserva para uso offline.
+// Rede primeiro, sempre revalidando (sem usar a cópia de 10 min do navegador); cache só como reserva offline.
 self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET') return;
+  const sameOrigin = new URL(e.request.url).origin === self.location.origin;
   e.respondWith(
-    fetch(e.request)
+    fetch(sameOrigin ? new Request(e.request, { cache: 'no-cache' }) : e.request)
       .then((res) => {
         const copy = res.clone();
         caches.open(CACHE).then((c) => c.put(e.request, copy));
