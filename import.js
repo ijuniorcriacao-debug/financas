@@ -281,8 +281,7 @@ function openImport(items, notes, defaultMethod = 'conta') {
 function importCard() {
   return `<div class="importbar"><span class="ic"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V4m0 0L8 8m4-4 4 4M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/></svg></span>
     <div class="grow"><b>Importar de PDF ou foto</b><div class="muted">Fatura, extrato, cupom ou comprovante</div></div>
-    <button class="primary" data-a="doc-import">Escolher</button>
-    <input type="file" id="doc-file" accept="application/pdf,image/*" multiple hidden></div>`;
+    <button class="primary" data-a="doc-import">Escolher</button></div>`;
 }
 document.addEventListener('change', (e) => {
   if (e.target.id === 'doc-file' && e.target.files.length) { const fs = e.target.files; importDocs(fs).finally(() => { e.target.value = ''; }); }

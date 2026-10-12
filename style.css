@@ -250,3 +250,7 @@ body.gate nav#tabs, body.gate #fab { display: none; }
 .tx.editable:active { background: var(--brand-soft); }
 
 #parc-help { min-height: 2.9em; }
+
+.importline { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; padding: 12px 14px; margin: 4px 0 6px; border: 1px dashed var(--muted); border-radius: var(--r-l); background: transparent; }
+.importline .ic { width: 36px; height: 36px; border-radius: 10px; background: var(--brand-soft); color: var(--brand); display: grid; place-items: center; flex: none; }
+.importline .ic svg { width: 20px; height: 20px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }

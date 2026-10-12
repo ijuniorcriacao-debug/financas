@@ -488,6 +488,7 @@ function openSetup() {
 function txForm(t) {
   const isNew = !t.id;
   openSheet(`<h2 style="margin-top:0">${isNew ? 'Novo lançamento' : 'Editar lançamento'}</h2>
+  ${isNew && t.kind === 'despesa' ? `<button type="button" class="importline" data-a="doc-import"><span class="ic"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V4m0 0L8 8m4-4 4 4M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/></svg></span><span class="grow"><b>Importar fatura em PDF ou foto</b><span class="muted" style="display:block">Eu leio as compras e você confere antes de lançar</span></span></button>` : ''}
   <form id="tx-form">
     ${t.kind === 'acerto' ? '' : seg('kind', [['despesa', 'Despesa'], ['receita', 'Receita extra']], t.kind)}
     <label>Descrição</label><input name="desc" value="${esc(t.desc)}" required placeholder="Ex.: Mercado da semana">
