@@ -1158,7 +1158,7 @@ async function boot() {
 boot();
 
 /* ---------- atualização do app ---------- */
-const APP_VERSION = 'v12';
+const APP_VERSION = 'v13';
 let swReg = null, updateWorker = null, userUpdating = false;
 function showUpdateBar(worker) {
   updateWorker = worker;
