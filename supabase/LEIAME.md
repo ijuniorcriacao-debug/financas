@@ -52,6 +52,8 @@ dos gastos "só meu" garantida **no servidor**.
 ## Forma de pagamento e parcelas
 - `tx.method` (`conta` | `dinheiro` | `cartao`), `tx.inst_no` e `tx.inst_total` (parcela atual / total, só no cartão).
 - No app: ao lançar no cartão parcelado ("parcela 3 de 10"), o app lança a 3/10 e as 7 seguintes, uma por mês.
-- **Cópia diária do banco (a terminar):** a tabela `public.backups` já existe (vazia, sem acesso para os usuários do app).
-  Falta criar a função `take_backup()` e agendar com `pg_cron`; as chamadas de DDL com corpo de função estouraram o
-  tempo no conector. Tentar de novo (função em pedaços menores) ou rodar `schema.sql` pelo SQL Editor.
+- **Cópia diária do banco:** a tabela `public.backups` guarda, uma vez por dia (06:00 UTC), uma foto de todos os dados
+  (job `backup-diario`, `pg_cron`). A primeira cópia foi tirada em 2026-10-09. Só o dono do projeto lê essa tabela.
+  Falta agendar a limpeza das cópias com mais de 35 dias (precisa de um `delete`, que o conector só executa com aprovação do
+  dono na hora). Sem a limpeza as cópias só acumulam (poucos KB por dia), o que é aceitável por bastante tempo.
+  Para restaurar: ler `select data from public.backups order by taken_at desc limit 1` e reinserir as linhas.

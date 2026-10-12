@@ -236,3 +236,22 @@ alter table public.tx drop constraint if exists tx_method_check;
 alter table public.tx add constraint tx_method_check check (method is null or method in ('conta', 'dinheiro', 'cartao'));
 alter table public.tx drop constraint if exists tx_inst_check;
 alter table public.tx add constraint tx_inst_check check ((inst_no is null and inst_total is null) or (inst_total between 2 and 120 and inst_no between 1 and inst_total));
+
+-- ------------------------------------------------------- cópia diária do banco
+-- Guarda uma foto de todos os dados da casa por dia (tabela backups). Só o dono do projeto lê (sem acesso pelo app).
+create table if not exists public.backups (
+  id           bigint generated always as identity primary key,
+  taken_at     timestamptz not null default now(),
+  household_id uuid not null,
+  counts       jsonb not null,
+  data         jsonb not null
+);
+create index if not exists backups_household_taken on public.backups (household_id, taken_at desc);
+alter table public.backups enable row level security;
+revoke all on public.backups from anon, authenticated;
+
+create extension if not exists pg_cron;
+-- todo dia às 06:00 UTC (03:00 em Brasília):
+select cron.schedule('backup-diario', '0 6 * * *', 'insert into public.backups (household_id, counts, data) select h.id, jsonb_build_object(''tx'', (select count(*) from public.tx x where x.household_id = h.id), ''tpl'', (select count(*) from public.tpl t where t.household_id = h.id), ''cats'', (select count(*) from public.cats c where c.household_id = h.id)), jsonb_build_object(''household'', to_jsonb(h), ''members'', coalesce((select jsonb_agg(to_jsonb(m)) from public.members m where m.household_id = h.id), ''[]''::jsonb), ''cats'', coalesce((select jsonb_agg(to_jsonb(c)) from public.cats c where c.household_id = h.id), ''[]''::jsonb), ''tpl'', coalesce((select jsonb_agg(to_jsonb(t)) from public.tpl t where t.household_id = h.id), ''[]''::jsonb), ''tx'', coalesce((select jsonb_agg(to_jsonb(x)) from public.tx x where x.household_id = h.id), ''[]''::jsonb)) from public.households h');
+-- Limpeza opcional das cópias com mais de 35 dias (ainda NÃO agendada; roda à mão ou vira um segundo job):
+--   delete from public.backups where taken_at < now() - interval '35 days';
