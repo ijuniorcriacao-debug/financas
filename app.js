@@ -414,12 +414,17 @@ function viewPend() {
       ${itemsBlock(g[0].planId, total)}</div>`;
   }).join('') : '<div class="empty">Nenhum combinado ainda.<br>Toque em <b>Novo combinado</b> para parcelar o que um pagou pelo outro.</div>'}`;
 }
+function makePlan(label, debtor, total, n, first, done = 0) {
+  const planId = uid(), per = Math.floor(total / n);
+  for (let i = 0; i < n; i++) S.plans.push({ id: uid(), planId, label, debtor, dueYm: shiftYm(first, i), no: i + 1, total: n, cents: i === n - 1 ? total - per * (n - 1) : per, paid: i < done });
+  return planId;
+}
 function itemsBlock(planId, planTotal) {
   const its = S.planItems.filter((i) => i.planId === planId).sort((a, b) => a.date.localeCompare(b.date));
   const sumI = its.reduce((a, i) => a + i.cents, 0);
   return `<details class="tbl" ${its.length ? '' : ''}><summary>Itens do combinado (${its.length}) · ${brl(sumI)}</summary>
     ${its.map((i) => `<div class="plan-row"><div class="grow"><b>${esc(i.desc)}</b><div class="muted">${dayLabel(i.date)}</div></div><div class="amt-col"><div class="amt">${brl(i.cents)}</div><div class="plan-act"><button type="button" class="link danger" data-a="item-del" data-v="${i.id}">remover</button></div></div></div>`).join('')}
-    ${its.length && sumI !== planTotal ? `<p class="muted warn">Os itens somam ${brl(sumI)} e as parcelas somam ${brl(planTotal)}.</p>` : ''}
+    ${its.length && sumI !== planTotal ? `<p class="muted warn">Os itens somam ${brl(sumI)} e as parcelas somam ${brl(planTotal)}.</p>${S.plans.some((p) => p.planId === planId && !p.paid) ? `<button type="button" data-a="plan-resync" data-v="${planId}">Ajustar as parcelas em aberto ao total dos itens</button>` : ''}` : ''}
     <button type="button" data-a="item-add" data-v="${planId}" style="margin-top:8px">Adicionar item</button></details>`;
 }
 function itemForm(planId) {
@@ -490,8 +495,8 @@ function planForm() {
     const badItem = items.find((i) => !(i.cents > 0) || !i.desc.trim() || !/^\d{4}-\d{2}-\d{2}$/.test(i.date));
     if (!c) { toast('Informe o valor total e o mês da primeira parcela'); return; }
     if (badItem) { toast('Confira cada item: descrição, valor e data'); return; }
-    const planId = uid(), debtor = +f.elements.debtor.value, label = f.elements.label.value.trim();
-    for (let i = 0; i < c.n; i++) S.plans.push({ id: uid(), planId, label, debtor, dueYm: shiftYm(c.first, i), no: i + 1, total: c.n, cents: i === c.n - 1 ? c.total - c.per * (c.n - 1) : c.per, paid: i < c.done });
+    const debtor = +f.elements.debtor.value, label = f.elements.label.value.trim();
+    const planId = makePlan(label, debtor, c.total, c.n, c.first, c.done);
     items.forEach((it) => S.planItems.push({ id: uid(), planId, date: it.date, desc: it.desc.trim(), cents: it.cents }));
     save(); closeSheet(); render(); toast('Combinado criado ✔');
   });
@@ -822,6 +827,16 @@ const actions = {
   'plan-paid-included': () => { S.plans.filter((p) => !p.paid && p.incYm === ui.ym).forEach((p) => { p.paid = true; p.paidOn = todayStr(); p.incYm = undefined; }); save(); render(); toast('Parcelas marcadas como pagas ✔'); },
   'plan-del': (v) => { if (!confirm('Excluir este combinado, as parcelas e os itens dele?')) return; S.plans = S.plans.filter((p) => p.planId !== v); S.planItems = S.planItems.filter((i) => i.planId !== v); save(); render(); toast('Combinado excluído'); },
   'item-add': (v) => itemForm(v),
+  'plan-resync': (v) => {
+    const ps = S.plans.filter((p) => p.planId === v).sort((a, b) => a.dueYm.localeCompare(b.dueYm));
+    const itemsSum = S.planItems.filter((i) => i.planId === v).reduce((a, i) => a + i.cents, 0);
+    const open = ps.filter((p) => !p.paid), paidSum = ps.filter((p) => p.paid).reduce((a, p) => a + p.cents, 0), rest = itemsSum - paidSum;
+    if (!open.length) { toast('Todas as parcelas já foram pagas'); return; }
+    if (rest <= 0) { toast('Os itens somam menos do que já foi pago'); return; }
+    const per = Math.floor(rest / open.length);
+    open.forEach((p, k) => { p.cents = k === open.length - 1 ? rest - per * (open.length - 1) : per; });
+    save(); render(); toast('Parcelas ajustadas ✔');
+  },
   'item-del': (v) => { S.planItems = S.planItems.filter((i) => i.id !== v); save(); render(); },
   'change-pass': () => gateNewPassword(false),
   'check-update': async () => {
@@ -1139,7 +1154,7 @@ async function boot() {
 boot();
 
 /* ---------- atualização do app ---------- */
-const APP_VERSION = 'v10';
+const APP_VERSION = 'v11';
 let swReg = null, updateWorker = null, userUpdating = false;
 function showUpdateBar(worker) {
   updateWorker = worker;

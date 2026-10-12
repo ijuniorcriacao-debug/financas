@@ -211,7 +211,8 @@ function openImport(items, notes, defaultMethod = 'conta') {
   const selfIdx = CLOUD ? S.me : (own ? ui.who : 0);
   const defDest = own ? String(ui.who) : 'casa';
   const st = { items: items.map((it) => ({ ...it, on: !it.dup, dest: defDest })), vis: 'open', nature: 'variavel', method: defaultMethod, payer: own ? String(ui.who) : String(selfIdx) };
-  const destOptions = (sel) => `<option value="casa" ${sel === 'casa' ? 'selected' : ''}>Casa (divide pela renda)</option>${[0, 1].map((i) => `<option value="${i}" ${sel === String(i) ? 'selected' : ''}>Só de ${esc(S.people[i].name)}</option>`).join('')}`;
+  const groups = typeof planGroups === 'function' ? planGroups() : [];
+  const destOptions = (sel) => `<option value="casa" ${sel === 'casa' ? 'selected' : ''}>Casa (divide pela renda)</option>${[0, 1].map((i) => `<option value="casa${i}" ${sel === 'casa' + i ? 'selected' : ''}>Casa · paga por ${esc(S.people[i].name)} (mês normal)</option>`).join('')}${[0, 1].map((i) => `<option value="${i}" ${sel === String(i) ? 'selected' : ''}>Só de ${esc(S.people[i].name)}</option>`).join('')}<optgroup label="Vai para um combinado (A acertar)">${groups.map((g) => `<option value="c:${g[0].planId}" ${sel === 'c:' + g[0].planId ? 'selected' : ''}>Itens de: ${esc(g[0].label)}</option>`).join('')}<option value="c:new" ${sel === 'c:new' ? 'selected' : ''}>Novo combinado…</option></optgroup>`;
   const rowHtml = (it, i) => `<div class="imp-row ${it.dup ? 'dup' : ''}"><label class="imp-on"><input type="checkbox" data-f="on" data-i="${i}" ${it.on ? 'checked' : ''}></label>
     <div class="grow"><input data-f="desc" data-i="${i}" value="${esc(it.desc)}" maxlength="80">
       <div class="imp-line"><input type="date" data-f="date" data-i="${i}" value="${esc(it.date)}"><input data-f="val" data-i="${i}" inputmode="decimal" value="${num(it.cents)}"><select data-f="cat" data-i="${i}">${catOptions(it.cat)}</select></div>
@@ -222,7 +223,13 @@ function openImport(items, notes, defaultMethod = 'conta') {
     <div class="imp-opts">
       <div class="grid2"><div><label>Destino de todas</label><select id="imp-dest-all">${destOptions(defDest)}</select></div>
         <div><label>Quem pagou (dono do cartão)</label><select id="imp-payer">${payerOptions(st.payer, true, false)}</select></div></div>
-      <p class="muted">Compra do outro no seu cartão? Troque o destino só dessa linha para "Só de …". Ela vai para a tela pessoal de quem usou.</p>
+      <p class="muted">Compra do outro no seu cartão? Troque o destino só dessa linha para "Só de …": ela vai para a tela pessoal de quem usou. Para devolver depois, escolha "Itens de…" um combinado: ela vira item dele, conta no valor do combinado e <b>não entra nos gastos</b>.</p>
+      <div id="imp-newplan" class="card" hidden><h3>Novo combinado</h3>
+        <label>Nome</label><input id="imp-np-label" maxlength="80" placeholder="Ex.: Gastos de setembro e outubro">
+        <div class="grid2"><div><label>Quem vai pagar</label><select id="imp-np-debtor">${[0, 1].map((i) => `<option value="${i}">${esc(S.people[i].name)}</option>`).join('')}</select></div>
+          <div><label>Parcelas</label><input id="imp-np-n" type="number" inputmode="numeric" min="1" max="60" value="6"></div></div>
+        <label>Primeira parcela em</label><input id="imp-np-first" type="month" value="${shiftYm(ui.ym, 1)}">
+        <p class="muted" id="imp-np-help"></p></div>
       <div id="imp-vis" hidden><label>Seus gastos pessoais: quem pode ver</label>${seg('imp-vis', [['open', 'Parceiro vê'], ['private', 'Só eu']], st.vis)}</div>
       <div class="grid2"><div><label>Como foi pago</label><select id="imp-method">${Object.entries(METHODS).map(([k, l]) => `<option value="${k}" ${k === st.method ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
         <div><label>Tipo de gasto</label><select id="imp-nature">${Object.entries(NATURES).map(([k, l]) => `<option value="${k}" ${k === st.nature ? 'selected' : ''}>${l}</option>`).join('')}</select></div></div>
@@ -232,10 +239,19 @@ function openImport(items, notes, defaultMethod = 'conta') {
     <div class="actions"><button type="button" id="imp-cancel">Cancelar</button><button class="primary" type="button" id="imp-go">Lançar</button></div>`);
 
   const refreshVis = () => { $('#imp-vis').hidden = !st.items.some((x) => x.dest === String(selfIdx)); };
+  const refreshNewPlan = () => {
+    const rows = st.items.filter((x) => x.on && x.dest === 'c:new');
+    const box = $('#imp-newplan');
+    if (box.hidden && rows.length) $('#imp-np-debtor').value = String(st.payer === 'joint' ? 0 : 1 - +st.payer);
+    box.hidden = !rows.length;
+    if (rows.length) { const t = rows.reduce((a, x) => a + (x.cents || 0), 0), n = Math.max(1, Math.min(60, +$('#imp-np-n').value || 1)); $('#imp-np-help').textContent = `${rows.length} item(ns), total ${brl(t)}: ${n} parcela(s) de ${brl(Math.floor(t / n))}.`; }
+  };
   const refreshCount = () => {
     const sel = st.items.filter((x) => x.on);
-    const other = sel.filter((x) => x.dest !== 'casa' && x.dest !== String(selfIdx)).length;
-    $('#imp-count').textContent = `${sel.length} de ${st.items.length} selecionados · ${brl(sel.reduce((a, x) => a + (x.cents || 0), 0))}${other ? ` · ${other} para a tela do outro` : ''}`;
+    const combo = sel.filter((x) => x.dest.startsWith('c:')).length;
+    const other = sel.filter((x) => !x.dest.startsWith('casa') && x.dest !== String(selfIdx) && !x.dest.startsWith('c:')).length;
+    $('#imp-count').textContent = `${sel.length} de ${st.items.length} selecionados · ${brl(sel.reduce((a, x) => a + (x.cents || 0), 0))}${other ? ` · ${other} para a tela do outro` : ''}${combo ? ` · ${combo} para combinado` : ''}`;
+    refreshNewPlan();
     $('#imp-go').textContent = sel.length ? `Lançar ${sel.length}` : 'Nada selecionado';
     $('#imp-go').disabled = !sel.length;
   };
@@ -247,6 +263,7 @@ function openImport(items, notes, defaultMethod = 'conta') {
     else if (el.id === 'imp-payer') st.payer = el.value;
     else if (el.id === 'imp-nature') st.nature = el.value;
     else if (el.id === 'imp-method') st.method = el.value;
+    else if (el.id && el.id.startsWith('imp-np-')) { refreshNewPlan(); return; }
     else if (el.id === 'imp-dest-all') {
       st.items.forEach((x, i) => { x.dest = el.value; sheet.querySelector(`[data-f=dest][data-i="${i}"]`).value = el.value; });
       refreshVis(); refreshCount();
@@ -267,10 +284,22 @@ function openImport(items, notes, defaultMethod = 'conta') {
     const sel = st.items.filter((x) => x.on);
     const bad = sel.find((x) => !(x.cents > 0) || !/^\d{4}-\d{2}-\d{2}$/.test(x.date) || !x.desc.trim());
     if (bad) { toast('Confira data, descrição e valor de cada linha marcada'); return; }
+    const comboNew = sel.filter((x) => x.dest === 'c:new');
+    let newPlanId = null;
+    if (comboNew.length) {
+      const label = $('#imp-np-label').value.trim(), n = +$('#imp-np-n').value, first = $('#imp-np-first').value;
+      if (!label || !(n >= 1 && n <= 60) || !/^\d{4}-\d{2}$/.test(first)) { toast('Preencha o nome, as parcelas e o mês do novo combinado'); return; }
+      newPlanId = makePlan(label, +$('#imp-np-debtor').value, comboNew.reduce((a, x) => a + x.cents, 0), n, first);
+    }
     const rules = readRules();
     sel.forEach((x) => {
+      if (x.dest.startsWith('c:')) {
+        S.planItems.push({ id: uid(), planId: x.dest === 'c:new' ? newPlanId : x.dest.slice(2), date: x.date, desc: x.desc.trim().slice(0, 80), cents: x.cents });
+        rules[normKey(x.desc)] = x.cat;
+        return;
+      }
       const base = { id: uid(), createdBy: CLOUD ? cloudUid : undefined, kind: 'despesa', date: x.date, desc: x.desc.trim().slice(0, 80), cents: x.cents, cat: x.cat, nature: st.nature, method: st.method, instNo: st.method === 'cartao' ? x.instNo : undefined, instTotal: st.method === 'cartao' ? x.instTotal : undefined, paid: true };
-      if (x.dest === 'casa') S.tx.push({ ...base, split: 'shared', payer: st.payer === 'joint' ? 'joint' : +st.payer });
+      if (x.dest.startsWith('casa')) S.tx.push({ ...base, split: 'shared', payer: x.dest === 'casa' ? (st.payer === 'joint' ? 'joint' : +st.payer) : +x.dest.slice(4) });
       else {
         const owner = +x.dest;
         // gasto pessoal de OUTRA pessoa precisa ficar visível para ela (e para quem lançou)
@@ -280,8 +309,10 @@ function openImport(items, notes, defaultMethod = 'conta') {
     });
     saveRules(rules);
     save(); closeSheet();
-    if (!sel.some((x) => x.date.startsWith(ui.ym))) ui.ym = sel.map((x) => x.date).sort().pop().slice(0, 7);
-    render(); toast(`${sel.length} gastos lançados ✔`);
+    const txCount = sel.length - sel.filter((x) => x.dest.startsWith('c:')).length;
+    if (txCount && !sel.some((x) => !x.dest.startsWith('c:') && x.date.startsWith(ui.ym))) ui.ym = sel.filter((x) => !x.dest.startsWith('c:')).map((x) => x.date).sort().pop().slice(0, 7);
+    if (!txCount && sel.length) { ui.who = 'casa'; ui.tab = 'pend'; }
+    render(); toast(`${txCount ? `${txCount} gastos lançados` : ''}${txCount && sel.length - txCount ? ' · ' : ''}${sel.length - txCount ? `${sel.length - txCount} itens em combinados` : ''} ✔`);
   };
 }
 

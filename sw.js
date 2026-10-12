@@ -1,4 +1,4 @@
-const CACHE = 'financas-v10';
+const CACHE = 'financas-v11';
 const ASSETS = ['./', './index.html', './style.css', './app.js', './import.js', './config.js', './manifest.json', './icon.svg'];
 
 // A versão nova espera o usuário tocar em "Atualizar" no app (mensagem SKIP_WAITING); assim ninguém perde o que está digitando.
