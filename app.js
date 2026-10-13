@@ -116,11 +116,14 @@ const canSee = (t, who) => !isPersonal(t) || (who !== 'casa' && (t.payer === who
 const expenses = (list) => list.filter((t) => t.kind === 'despesa');
 const sum = (list) => list.reduce((s, t) => s + t.cents, 0);
 
+/** Renda do mês. Entradas extras só contam como renda do mês se forem "recorrentes" (nature 'fixa'); as demais são únicas e ficam à parte. */
 function monthIncome(ym) {
   const extras = monthTx(ym).filter((t) => t.kind === 'receita');
+  const rec = extras.filter((t) => t.nature === 'fixa'), once = extras.filter((t) => t.nature !== 'fixa');
   const base = [S.people[0].income, S.people[1].income];
-  const ext = [0, 1].map((i) => sum(extras.filter((t) => t.payer === i)));
-  return { base, ext, person: [base[0] + ext[0], base[1] + ext[1]], total: base[0] + base[1] + ext[0] + ext[1] };
+  const ext = [0, 1].map((i) => sum(rec.filter((t) => t.payer === i)));
+  const onceP = [0, 1].map((i) => sum(once.filter((t) => t.payer === i)));
+  return { base, ext, once: sum(once), onceP, person: [base[0] + ext[0], base[1] + ext[1]], total: base[0] + base[1] + ext[0] + ext[1] };
 }
 
 /** Acerto de contas: quanto cada um pagou a mais/menos do que a sua parte justa. */
@@ -211,7 +214,10 @@ const bar = (value, max, over) => `<div class="bar ${over ? 'over' : ''}"><i sty
 /* ----- Resumo ----- */
 function viewResumo() {
   const list = houseTx(ui.ym), exp = expenses(list), spent = sum(exp);
-  const inc = monthIncome(ui.ym), left = inc.total - spent;
+  const inc = monthIncome(ui.ym);
+  const persSpent = [0, 1].map((i) => sum(expenses(personalTx(ui.ym, i).filter((t) => !CLOUD || canSee(t, S.me)))));
+  const comboMonth = S.plans.filter((p) => p.incYm === ui.ym).reduce((a, p) => a + p.cents, 0);
+  const left = inc.total - spent - persSpent[0] - persSpent[1] - comboMonth, leftAll = left + inc.once;
   const goal = Math.round(inc.total * S.savingsPct / 100);
   const used = inc.total > 0 ? spent / inc.total : 0;
   const nat = { fixa: 0, variavel: 0, esporadica: 0 };
@@ -235,10 +241,19 @@ function viewResumo() {
       <div class="pair"><i class="inc" style="height:${(d.inc / trendMax) * 100}%"></i><i class="exp" style="height:${(d.exp / trendMax) * 100}%"></i></div><div class="mo">${monthShort(d.m)}</div></div>`).join('');
 
   return `${monthHeader('Resumo')}
-  <div class="hero"><div class="lbl">${left >= 0 ? 'Sobra depois das contas da casa' : 'Faltou para cobrir a casa'}</div>
+  <div class="hero"><div class="lbl">${left >= 0 ? 'Sobra do casal no mês' : 'Faltou para fechar o mês'}</div>
     <div class="fig ${left >= 0 ? '' : 'bad'}">${brl(left)}</div>
     <div class="sub"><span class="pill ${left >= goal ? 'good' : 'warn'}">${left >= goal ? 'Meta de guardar atingida' : `Faltam ${brl(goal - Math.max(left, 0))} para a meta`}</span>
       <span style="margin-left:6px">Meta: <b>${brl(goal)}</b> (${S.savingsPct}% da renda)</span></div></div>
+
+  <details class="tbl" open><summary><b>Como chegamos nesse valor</b></summary>
+    <table><tr><td>Salários${inc.ext[0] + inc.ext[1] ? ' + entradas recorrentes' : ''}</td><td>${brl(inc.total)}</td></tr>
+    <tr><td>− Despesas da Casa</td><td>${brl(spent)}</td></tr>
+    ${S.people.map((p, i) => `<tr><td>− Pessoal de ${esc(p.name)}</td><td>${brl(persSpent[i])}</td></tr>`).join('')}
+    ${comboMonth ? `<tr><td>− Parcelas de combinado incluídas</td><td>${brl(comboMonth)}</td></tr>` : ''}
+    <tr><td><b>= Sobra do mês</b></td><td><b>${brl(left)}</b></td></tr>
+    ${inc.once ? `<tr><td>+ Entradas únicas (extras)</td><td>${brl(inc.once)}</td></tr><tr><td><b>= Sobra com as entradas únicas</b></td><td><b>${brl(leftAll)}</b></td></tr>` : ''}</table>
+    ${CLOUD ? '<p class="muted">Gastos pessoais marcados como "só meu" do outro não aparecem para você e ficam de fora desta conta.</p>' : ''}</details>
 
   <div class="kpis">
     <div><div class="l">Receitas</div><div class="v">${brl0(inc.total)}</div></div>
@@ -666,6 +681,8 @@ function txForm(t) {
       <div id="vis-fields" ${t.split === 'personal' ? '' : 'hidden'}><label>Quem pode ver</label>${seg('vis', [['open', 'Parceiro vê'], ['private', 'Só eu']], t.vis || 'open')}</div>
       <p class="muted" id="vis-other" hidden>Gasto da outra pessoa: aparece para os dois, e vocês dois podem corrigir.</p>
     </div>
+    <div id="rec-fields" ${t.kind === 'receita' ? '' : 'hidden'}><label>Tipo de entrada</label>${seg('rec', [['unica', 'Única (só neste mês)'], ['fixa', 'Recorrente (todo mês)']], t.nature === 'fixa' ? 'fixa' : 'unica')}
+      <p class="muted">Entrada única (rescisão, venda, bônus) aparece à parte e não entra na renda nem na meta do mês.</p></div>
     <label id="l-payer">${t.kind === 'receita' ? 'Quem recebeu' : t.split === 'personal' ? 'De quem é o gasto' : 'Quem pagou'}</label><select name="payer">${payerOptions(t.payer, t.kind === 'despesa' && t.split !== 'personal', false)}</select>
     <div class="actions">${isNew ? '' : '<button type="button" class="danger" data-a="del-tx">Excluir</button>'}<button class="primary" type="submit">Salvar</button></div>
   </form>`);
@@ -673,6 +690,7 @@ function txForm(t) {
   const sync = () => {
     const k = t.kind === 'acerto' ? 'acerto' : val(f, 'kind');
     $('#exp-fields').hidden = k !== 'despesa';
+    $('#rec-fields').hidden = k !== 'receita';
     const sp = f.querySelector('[name=split]:checked');
     const personalSel = k === 'despesa' && !!sp && sp.value === 'personal';
     $('#vis-fields').hidden = !personalSel;
@@ -707,6 +725,7 @@ function txForm(t) {
     const cents = parseMoney(val(f, 'val'));
     if (cents <= 0) { toast('Informe um valor maior que zero'); return; }
     const base = { ...t, kind, desc: val(f, 'desc').trim(), cents, date: val(f, 'date'), payer };
+    if (kind === 'receita') base.nature = f.querySelector('[name=rec]:checked').value === 'fixa' ? 'fixa' : 'variavel';
     if (kind === 'despesa') {
       base.cat = val(f, 'cat'); base.nature = f.querySelector('[name=nature]:checked').value;
       base.split = payer === 'joint' ? 'shared' : f.querySelector('[name=split]:checked').value;
@@ -1160,7 +1179,7 @@ async function boot() {
 boot();
 
 /* ---------- atualização do app ---------- */
-const APP_VERSION = 'v15';
+const APP_VERSION = 'v16';
 let swReg = null, updateWorker = null, userUpdating = false;
 function showUpdateBar(worker) {
   updateWorker = worker;
