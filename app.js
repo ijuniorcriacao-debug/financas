@@ -216,7 +216,7 @@ function viewResumo() {
   const list = houseTx(ui.ym), exp = expenses(list), spent = sum(exp);
   const inc = monthIncome(ui.ym);
   const persSpent = [0, 1].map((i) => sum(expenses(personalTx(ui.ym, i).filter((t) => !CLOUD || canSee(t, S.me)))));
-  const comboMonth = S.plans.filter((p) => p.incYm === ui.ym).reduce((a, p) => a + p.cents, 0);
+  const comboPd = comboPaid(ui.ym), comboMonth = comboPd[0] + comboPd[1];
   const left = inc.total - spent - persSpent[0] - persSpent[1] - comboMonth, leftAll = left + inc.once;
   const goal = Math.round(inc.total * S.savingsPct / 100);
   const used = inc.total > 0 ? spent / inc.total : 0;
@@ -250,7 +250,7 @@ function viewResumo() {
     <table><tr><td>Salários${inc.ext[0] + inc.ext[1] ? ' + entradas recorrentes' : ''}</td><td>${brl(inc.total)}</td></tr>
     <tr><td>− Despesas da Casa</td><td>${brl(spent)}</td></tr>
     ${S.people.map((p, i) => `<tr><td>− Pessoal de ${esc(p.name)}</td><td>${brl(persSpent[i])}</td></tr>`).join('')}
-    ${comboMonth ? `<tr><td>− Parcelas de combinado incluídas</td><td>${brl(comboMonth)}</td></tr>` : ''}
+    ${comboMonth ? `<tr><td>− Pago de um pelo outro (combinados, a devolver)</td><td>${brl(comboMonth)}</td></tr>` : ''}
     <tr><td><b>= Sobra do mês</b></td><td><b>${brl(left)}</b></td></tr>
     ${inc.once ? `<tr><td>+ Entradas únicas (extras)</td><td>${brl(inc.once)}</td></tr><tr><td><b>= Sobra com as entradas únicas</b></td><td><b>${brl(leftAll)}</b></td></tr>` : ''}</table>
     ${CLOUD ? '<p class="muted">Gastos pessoais marcados como "só meu" do outro não aparecem para você e ficam de fora desta conta.</p>' : ''}</details>
@@ -317,11 +317,18 @@ function insights(list, prevList, incTotal, useBudgets) {
 }
 
 /* ----- Tela de cada pessoa ----- */
+/** Itens de combinado do mês (pela data da compra): quem pagou por quem. paidBy[i] = quanto i pagou pelo outro. */
+function comboPaid(ym) {
+  const debtor = {}; S.plans.forEach((p) => { debtor[p.planId] = p.debtor; });
+  const paidBy = [0, 0];
+  S.planItems.filter((it) => it.date.startsWith(ym) && debtor[it.planId] !== undefined).forEach((it) => { paidBy[1 - debtor[it.planId]] += it.cents; });
+  return paidBy;
+}
 function viewMeu() {
   const i = ui.who, p = S.people[i], o = S.people[1 - i];
   const inc = monthIncome(ui.ym), s = settlement(ui.ym);
   const mine = personalTx(ui.ym, i), spent = sum(mine), income = inc.person[i], fair = s.fair[i];
-  const left = income - fair - spent, goal = Math.round(income * S.savingsPct / 100);
+  const comboPd = comboPaid(ui.ym), left = income - fair - spent - comboPd[i], goal = Math.round(income * S.savingsPct / 100);
   const cats = byCategory(mine), top = cats[0] ? cats[0].cents : 0;
   const shared = personalTx(ui.ym, 1 - i).filter((t) => t.vis !== 'private');
   const acerto = s.debtor === null ? '' : s.debtor === i
@@ -335,6 +342,7 @@ function viewMeu() {
     <tr><td>Sua renda</td><td>${brl(income)}</td></tr>
     <tr><td>Sua parte da casa (${pct(s.r[i])})</td><td>− ${brl(fair)}</td></tr>
     <tr><td>Seus gastos pessoais</td><td>− ${brl(spent)}</td></tr>
+    ${comboPd[i] ? `<tr><td>Você pagou por ${esc(o.name)} (combinado, a receber)</td><td>− ${brl(comboPd[i])}</td></tr>` : ''}
     <tr><td><b>Sobra</b></td><td class="${left >= 0 ? 'good' : 'bad'}"><b>${brl(left)}</b></td></tr></table></div>
   ${acerto}
   <h2>Seus gastos pessoais</h2>
@@ -1179,7 +1187,7 @@ async function boot() {
 boot();
 
 /* ---------- atualização do app ---------- */
-const APP_VERSION = 'v16';
+const APP_VERSION = 'v17';
 let swReg = null, updateWorker = null, userUpdating = false;
 function showUpdateBar(worker) {
   updateWorker = worker;
